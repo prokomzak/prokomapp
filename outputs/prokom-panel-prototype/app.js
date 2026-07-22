@@ -63,6 +63,11 @@ let kbArticles = [];
 
 let calendarEvents = [];
 let timeSummary = null;
+let quickPolls = [];
+let selectedScheduleWeekStart = "";
+let activeScheduleEdit = null;
+let wageRates = {};
+let selectedWageLogin = "";
 
 const columnLabels = {
   todo: "Do zrobienia",
@@ -84,6 +89,7 @@ let currentReportFilter = "open";
 let kbSearchQuery = "";
 let activePostId = null;
 let activeTaskId = null;
+let activeFeedItemId = null;
 let backendAvailable = false;
 let announcementPollTimer = null;
 let announcementPollInFlight = false;
@@ -103,6 +109,9 @@ const calendarPollIntervalMs = 6000;
 let knowledgePollTimer = null;
 let knowledgePollInFlight = false;
 const knowledgePollIntervalMs = 7000;
+let quickPollTimer = null;
+let quickPollInFlight = false;
+const quickPollIntervalMs = 8000;
 let presencePollTimer = null;
 let presencePollInFlight = false;
 const presencePollIntervalMs = 5000;
@@ -116,6 +125,8 @@ const storageKeys = {
   chatGroups: "prokom-chat-groups-v2",
   chatMessages: "prokom-chat-messages-v2",
   notificationReadIds: "prokom-notification-read-ids-v2",
+  quickPolls: "prokom-quick-polls-v1",
+  wageRates: "prokom-wage-rates-v1",
 };
 
 const viewTitles = {
@@ -180,6 +191,122 @@ function writeStorage(key, value) {
   } catch {
     showToast("Nie zapisano zmian", "Przeglądarka zablokowała localStorage.");
   }
+}
+
+function localDateFromInput(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateInput(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getWeekStartDate(date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayOffset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - dayOffset);
+  return start;
+}
+
+function getScheduleWeekStart() {
+  if (!selectedScheduleWeekStart) selectedScheduleWeekStart = formatDateInput(getWeekStartDate());
+  return selectedScheduleWeekStart;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addWeeksToDateInput(value, weeks) {
+  return formatDateInput(addDays(localDateFromInput(value) || getWeekStartDate(), weeks * 7));
+}
+
+function weekInputValueFromDate(date) {
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNumber = target.getUTCDay() || 7;
+  target.setUTCDate(target.getUTCDate() + 4 - dayNumber);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((target - yearStart) / 86400000 + 1) / 7);
+  return `${target.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function weekStartFromWeekInput(value) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(String(value || ""));
+  if (!match) return getScheduleWeekStart();
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  const janFourth = new Date(year, 0, 4);
+  return formatDateInput(addDays(getWeekStartDate(janFourth), (week - 1) * 7));
+}
+
+function formatScheduleDate(value) {
+  const date = localDateFromInput(value);
+  if (!date) return value || "";
+  return new Intl.DateTimeFormat("pl-PL", { day: "2-digit", month: "2-digit" }).format(date);
+}
+
+function formatScheduleWeekRange(weekStart) {
+  const start = localDateFromInput(weekStart) || getWeekStartDate();
+  const end = addDays(start, 4);
+  return `${formatScheduleDate(formatDateInput(start))} - ${formatScheduleDate(formatDateInput(end))}`;
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" }).format(Number(value) || 0);
+}
+
+function formatHourlyRate(value) {
+  return `${new Intl.NumberFormat("pl-PL", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0)} zł/h`;
+}
+
+const scheduleNoteLabels = {
+  wolne: "Wolne",
+  urlop: "Urlop",
+  l4: "L4",
+  szkolenie: "Szkolenie",
+};
+
+function timeToMinutes(value) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(value || ""));
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function parseScheduleValue(value = "") {
+  const text = String(value || "").trim();
+  const normalized = text.replace("–", "-").replace("—", "-");
+  const workMatch = /^([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)$/.exec(normalized);
+  if (workMatch) {
+    return {
+      mode: "work",
+      start: `${String(Number(workMatch[1])).padStart(2, "0")}:${workMatch[2]}`,
+      end: `${String(Number(workMatch[3])).padStart(2, "0")}:${workMatch[4]}`,
+    };
+  }
+  const note = normalizeSearch(text);
+  if (scheduleNoteLabels[note]) return { mode: note, start: "", end: "" };
+  return { mode: "work", start: "", end: "" };
+}
+
+function scheduleDisplayValue(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "Dodaj wpis";
+  const parsed = parseScheduleValue(text);
+  if (parsed.mode === "work" && parsed.start && parsed.end) return `${parsed.start} - ${parsed.end}`;
+  return scheduleNoteLabels[parsed.mode] || text;
+}
+
+function scheduleCellClass(value = "") {
+  const parsed = parseScheduleValue(value);
+  if (!String(value || "").trim()) return "empty";
+  return parsed.mode === "work" ? "work" : "note";
 }
 
 async function apiRequest(path, options = {}) {
@@ -563,19 +690,24 @@ function formatWorkDuration(seconds = 0) {
 function applyTimeSummary(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return false;
   timeSummary = snapshot;
+  if (snapshot.schedule?.weekStart) {
+    selectedScheduleWeekStart = snapshot.schedule.weekStart;
+  }
   if (Array.isArray(snapshot.people)) {
     const byLogin = new Map(snapshot.people.map((person) => [person.login, person]));
     people = people.map((person) => ({ ...person, ...(byLogin.get(person.login) || {}) }));
   }
   renderTimeDashboard();
   renderSchedule();
+  renderWageCalculator();
   return true;
 }
 
 async function syncTimeSummaryFromBackend(options = {}) {
   if (!backendAvailable || !isLoggedIn()) return false;
   try {
-    const snapshot = await apiRequest("/time/summary", { headers: {} });
+    const weekStart = encodeURIComponent(options.weekStart || getScheduleWeekStart());
+    const snapshot = await apiRequest(`/time/summary?weekStart=${weekStart}`, { headers: {} });
     return applyTimeSummary(snapshot);
   } catch {
     if (!options.silent) showToast("Czas pracy", "Nie udało się pobrać statystyk czasu pracy.");
@@ -604,6 +736,49 @@ function renderTimeDashboard() {
     const missing = Number(pulse.missingToday || 0);
     pulseBadge.textContent = missing ? `${missing} nieobecnych` : "Aktualne";
     pulseBadge.className = `pill ${missing ? "amber" : "green"}`;
+  }
+}
+
+function getWagePeople() {
+  const source = timeSummary?.people?.length ? timeSummary.people : activePeople();
+  if (role !== "admin") {
+    return source.filter((person) => person.login === getActiveLogin() || person.name === getActiveName());
+  }
+  return source.filter((person) => person.active !== false);
+}
+
+function saveWageRates() {
+  writeStorage(storageKeys.wageRates, wageRates);
+}
+
+function renderWageCalculator() {
+  const select = $("#wageUserSelect");
+  const rateInput = $("#wageRateInput");
+  if (!select || !rateInput) return;
+  const wagePeople = getWagePeople();
+  const fallbackLogin = role === "admin" ? wagePeople[0]?.login : getActiveLogin();
+  selectedWageLogin = wagePeople.some((person) => person.login === selectedWageLogin)
+    ? selectedWageLogin
+    : fallbackLogin || getActiveLogin();
+  select.innerHTML = wagePeople
+    .map((person) => `<option value="${escapeHtml(person.login)}">${escapeHtml(person.name)}</option>`)
+    .join("");
+  if (selectedWageLogin) select.value = selectedWageLogin;
+  select.disabled = role !== "admin";
+
+  const rate = Math.max(0, Number(wageRates[selectedWageLogin]) || 0);
+  if (document.activeElement !== rateInput) {
+    rateInput.value = rate ? String(rate.toFixed(2)) : "";
+  }
+  const person = wagePeople.find((item) => item.login === selectedWageLogin) || {};
+  const monthSeconds = Number(person.scheduledMonthSeconds ?? timeSummary?.personal?.scheduledMonthSeconds ?? 0);
+  const hours = monthSeconds / 3600;
+  $("#wageMonthHours").textContent = formatWorkDuration(monthSeconds);
+  $("#wageRateDisplay").textContent = formatHourlyRate(rate);
+  $("#wageTotalDisplay").textContent = formatMoney(hours * rate);
+  const monthLabel = $("#wageMonthLabel");
+  if (monthLabel) {
+    monthLabel.textContent = new Intl.DateTimeFormat("pl-PL", { month: "long", year: "numeric" }).format(new Date());
   }
 }
 
@@ -1338,6 +1513,10 @@ function loadStoredState() {
   }
   const storedNotificationReadIds = readStorage(storageKeys.notificationReadIds, []);
   notificationReadIds = new Set(Array.isArray(storedNotificationReadIds) ? storedNotificationReadIds.map(String) : []);
+  const storedQuickPolls = readStorage(storageKeys.quickPolls, []);
+  quickPolls = Array.isArray(storedQuickPolls) ? storedQuickPolls.map(normalizeQuickPoll).filter(Boolean) : [];
+  const storedWageRates = readStorage(storageKeys.wageRates, {});
+  wageRates = storedWageRates && typeof storedWageRates === "object" ? storedWageRates : {};
   normalizeRequests();
   normalizeTasks();
   normalizeReports();
@@ -1350,6 +1529,234 @@ function saveAccountState() {
 
 function saveMyDayState() {
   writeStorage(storageKeys.myDay, myDayItems);
+}
+
+function makeQuickPollId() {
+  return `poll-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeQuickPoll(poll) {
+  if (!poll || typeof poll !== "object") return null;
+  const options = Array.isArray(poll.options)
+    ? poll.options.map((option) => String(option || "").trim()).filter(Boolean).slice(0, 4)
+    : [];
+  if (!poll.question || options.length < 2) return null;
+  const votes = poll.votes && typeof poll.votes === "object" ? poll.votes : {};
+  return {
+    id: String(poll.id || makeQuickPollId()),
+    question: String(poll.question).trim(),
+    options,
+    votes: Object.fromEntries(
+      Object.entries(votes)
+        .map(([login, optionIndex]) => [normalizeLogin(login), Number(optionIndex)])
+        .filter(([login, optionIndex]) => login && Number.isInteger(optionIndex) && optionIndex >= 0 && optionIndex < options.length),
+    ),
+    createdBy: normalizeLogin(poll.createdBy || getActiveLogin()),
+    createdAt: poll.createdAt || new Date().toISOString(),
+  };
+}
+
+function saveQuickPollState() {
+  quickPolls = quickPolls.map(normalizeQuickPoll).filter(Boolean);
+  writeStorage(storageKeys.quickPolls, quickPolls);
+}
+
+function quickPollVoteCounts(poll) {
+  const counts = poll.options.map(() => 0);
+  Object.values(poll.votes || {}).forEach((optionIndex) => {
+    if (Number.isInteger(optionIndex) && counts[optionIndex] !== undefined) counts[optionIndex] += 1;
+  });
+  return counts;
+}
+
+function votesLabel(count) {
+  if (count === 1) return "1 głos";
+  if (count > 1 && count < 5) return `${count} głosy`;
+  return `${count} głosów`;
+}
+
+function renderQuickPollCard(poll) {
+  const counts = quickPollVoteCounts(poll);
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  const userVote = poll.votes?.[getActiveLogin()];
+  const creator = getDisplayNameByLogin(poll.createdBy) || poll.createdBy || "Użytkownik";
+  return `
+    <article class="poll-card">
+      <div class="widget-header">
+        <strong>${escapeHtml(poll.question)}</strong>
+        <span class="pill teal">${escapeHtml(votesLabel(total))}</span>
+      </div>
+      <span class="muted">Autor: ${escapeHtml(creator)} · ${escapeHtml(activityTimeLabel(poll.createdAt, "teraz"))}</span>
+      <div class="poll-options">
+        ${poll.options
+          .map((option, index) => {
+            const percent = total ? Math.round((counts[index] / total) * 100) : 0;
+            const active = Number(userVote) === index;
+            return `
+              <button class="poll-option ${active ? "active" : ""}" data-poll-vote="${escapeHtml(
+                poll.id,
+              )}" data-poll-option="${index}" type="button">
+                <span class="poll-option-row">
+                  <strong>${escapeHtml(option)}</strong>
+                  <span>${counts[index]} · ${percent}%</span>
+                </span>
+                <span class="poll-meter"><span style="width: ${percent}%"></span></span>
+              </button>
+            `;
+          })
+          .join("")}
+      </div>
+      ${Number.isInteger(Number(userVote)) ? `<span class="muted">Twój głos: ${escapeHtml(poll.options[userVote])}</span>` : ""}
+    </article>
+  `;
+}
+
+function renderQuickPoll() {
+  const box = $("#quickPollBox");
+  if (!box) return;
+  const visiblePolls = quickPolls.slice(0, 3);
+  box.innerHTML = visiblePolls.length
+    ? visiblePolls.map(renderQuickPollCard).join("")
+    : `<div class="empty-state">Brak aktywnych ankiet.</div>`;
+}
+
+function quickPollSignature(value = quickPolls) {
+  return JSON.stringify(
+    value.map((poll) => [
+      poll.id,
+      poll.question,
+      poll.options.join("|"),
+      Object.entries(poll.votes || {})
+        .sort(([loginA], [loginB]) => loginA.localeCompare(loginB))
+        .map(([login, optionIndex]) => `${login}:${optionIndex}`)
+        .join("|"),
+    ]),
+  );
+}
+
+function applyQuickPollSnapshot(snapshot) {
+  if (!Array.isArray(snapshot?.polls)) return false;
+  quickPolls = snapshot.polls.map(normalizeQuickPoll).filter(Boolean);
+  saveQuickPollState();
+  return true;
+}
+
+function missingPollEndpoint(error) {
+  return String(error?.message || "").includes("Nie znaleziono endpointu");
+}
+
+async function syncQuickPollsFromBackend(options = {}) {
+  if (!backendAvailable || !isLoggedIn()) return false;
+  const previousSignature = quickPollSignature();
+  try {
+    const snapshot = await apiRequest("/polls", { headers: {} });
+    applyQuickPollSnapshot(snapshot);
+    return previousSignature !== quickPollSignature();
+  } catch (error) {
+    if (missingPollEndpoint(error)) return false;
+    if (!options.silent) showToast("Ankiety", "Nie udało się pobrać wspólnych ankiet.");
+    return false;
+  }
+}
+
+async function pollQuickPolls() {
+  if (quickPollInFlight || document.hidden || !backendAvailable || !isLoggedIn()) return;
+  quickPollInFlight = true;
+  try {
+    const changed = await syncQuickPollsFromBackend({ silent: true });
+    if (changed) renderQuickPoll();
+  } finally {
+    quickPollInFlight = false;
+  }
+}
+
+function startQuickPollPolling() {
+  if (quickPollTimer || !backendAvailable || !isLoggedIn()) return;
+  quickPollTimer = window.setInterval(pollQuickPolls, quickPollIntervalMs);
+}
+
+function stopQuickPollPolling() {
+  if (!quickPollTimer) return;
+  window.clearInterval(quickPollTimer);
+  quickPollTimer = null;
+  quickPollInFlight = false;
+}
+
+function openPollForm() {
+  $("#pollForm").reset();
+  openDialog("#pollFormDialog");
+  window.setTimeout(() => $("#pollQuestionInput")?.focus(), 0);
+}
+
+async function createQuickPoll(event) {
+  event.preventDefault();
+  const question = $("#pollQuestionInput").value.trim();
+  const options = [$("#pollOptionOneInput").value.trim(), $("#pollOptionTwoInput").value.trim()].filter(Boolean);
+  if (!question || options.length < 2) return;
+  if (normalizeSearch(options[0]) === normalizeSearch(options[1])) {
+    showToast("Ankieta", "Podaj dwie różne odpowiedzi.");
+    return;
+  }
+  if (backendAvailable && isLoggedIn()) {
+    try {
+      const snapshot = await apiRequest("/polls", {
+        method: "POST",
+        body: JSON.stringify({ question, options }),
+      });
+      applyQuickPollSnapshot(snapshot);
+      renderQuickPoll();
+      $("#pollFormDialog").close();
+      event.target.reset();
+      showToast("Ankieta utworzona", question);
+      return;
+    } catch (error) {
+      if (!missingPollEndpoint(error)) {
+        showToast("Nie utworzono ankiety", error.message || "Backend odrzucił zapis.");
+        return;
+      }
+    }
+  }
+  quickPolls.unshift(
+    normalizeQuickPoll({
+      id: makeQuickPollId(),
+      question,
+      options,
+      votes: {},
+      createdBy: getActiveLogin(),
+      createdAt: new Date().toISOString(),
+    }),
+  );
+  saveQuickPollState();
+  renderQuickPoll();
+  $("#pollFormDialog").close();
+  event.target.reset();
+  showToast("Ankieta utworzona", question);
+}
+
+async function voteQuickPoll(pollId, optionIndex) {
+  const poll = quickPolls.find((item) => item.id === pollId);
+  if (!poll || !Number.isInteger(optionIndex) || !poll.options[optionIndex]) return;
+  if (backendAvailable && isLoggedIn()) {
+    try {
+      const snapshot = await apiRequest(`/polls/${encodeURIComponent(poll.id)}/vote`, {
+        method: "POST",
+        body: JSON.stringify({ optionIndex }),
+      });
+      applyQuickPollSnapshot(snapshot);
+      renderQuickPoll();
+      showToast("Głos zapisany", poll.options[optionIndex]);
+      return;
+    } catch (error) {
+      if (!missingPollEndpoint(error)) {
+        showToast("Nie zapisano głosu", error.message || "Backend odrzucił głos.");
+        return;
+      }
+    }
+  }
+  poll.votes[getActiveLogin()] = optionIndex;
+  saveQuickPollState();
+  renderQuickPoll();
+  showToast("Głos zapisany", poll.options[optionIndex]);
 }
 
 function makeTaskId() {
@@ -1477,6 +1884,7 @@ function refreshUserScopedUi() {
   renderMyDay();
   renderPeople();
   renderPosts(currentFeedFilter);
+  renderQuickPoll();
   renderKanban();
   renderRequests();
   renderReports();
@@ -1484,6 +1892,7 @@ function refreshUserScopedUi() {
   renderCalendar();
   renderChat();
   renderKnowledge();
+  renderWageCalculator();
   renderNotifications();
 }
 
@@ -1539,6 +1948,7 @@ async function signIn(login, password = "") {
       await syncRequestsFromBackend({ silent: true });
       await syncCalendarFromBackend({ silent: true });
       await syncKnowledgeFromBackend({ silent: true });
+      await syncQuickPollsFromBackend({ silent: true });
       await syncChatGroupsFromBackend({ silent: true });
       await syncVisibleChatMessagesFromBackend();
       startAnnouncementPolling();
@@ -1547,6 +1957,7 @@ async function signIn(login, password = "") {
       startRequestPolling();
       startCalendarPolling();
       startKnowledgePolling();
+      startQuickPollPolling();
       startChatPolling();
       startPresencePolling();
       $("#loginError").classList.add("hidden");
@@ -1591,6 +2002,7 @@ function signOut() {
   stopRequestPolling();
   stopCalendarPolling();
   stopKnowledgePolling();
+  stopQuickPollPolling();
   stopChatPolling();
   stopPresencePolling();
   if (backendAvailable) {
@@ -1619,6 +2031,7 @@ async function restoreSession() {
       await syncRequestsFromBackend({ silent: true });
       await syncCalendarFromBackend({ silent: true });
       await syncKnowledgeFromBackend({ silent: true });
+      await syncQuickPollsFromBackend({ silent: true });
       await syncChatGroupsFromBackend({ silent: true });
       await syncVisibleChatMessagesFromBackend();
       startAnnouncementPolling();
@@ -1627,6 +2040,7 @@ async function restoreSession() {
       startRequestPolling();
       startCalendarPolling();
       startKnowledgePolling();
+      startQuickPollPolling();
       startChatPolling();
       startPresencePolling();
       refreshUserScopedUi();
@@ -2405,9 +2819,32 @@ function renderActivityFeedItem(item) {
       <p class="note">${escapeHtml(item.body)}</p>
       <div class="feed-meta">${escapeHtml(item.meta)}</div>
       ${item.extraHtml || ""}
-      <button data-feed-item="${escapeHtml(item.id)}" type="button">${escapeHtml(item.actionLabel)}</button>
+      <div class="feed-card-actions">
+        <button class="secondary-button" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
+        <button class="secondary-button" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
+      </div>
     </article>
   `;
+}
+
+function getActivityFeedItemById(itemId) {
+  return buildActivityFeedItems().find((entry) => entry.id === itemId);
+}
+
+function openFeedItemDetails(itemId) {
+  const item = getActivityFeedItemById(itemId);
+  if (!item) return;
+  activeFeedItemId = item.id;
+  $("#feedDialogType").textContent = item.type || "Tablica";
+  $("#feedDialogTitle").textContent = item.title || "Szczegóły";
+  $("#feedDialogBody").textContent = item.body || "";
+  $("#feedDialogSource").textContent = item.actionLabel || "Źródło";
+  $("#feedDialogTime").textContent = item.time || "";
+  $("#feedDialogPill").textContent = item.pill || "";
+  $("#feedDialogPill").className = `pill ${item.color || ""}`;
+  $("#feedDialogMeta").textContent = item.meta || "";
+  $("#feedDialogExtra").innerHTML = item.extraHtml || "";
+  openDialog("#feedItemDialog");
 }
 
 function renderPostDialog(post = getPostById(activePostId)) {
@@ -2778,17 +3215,23 @@ function taskMatchesFilter(task) {
 }
 
 function renderSchedule() {
+  const requestedWeekStart = getScheduleWeekStart();
   const schedule = timeSummary?.schedule;
-  const days = schedule?.days?.length
+  const scheduleMatchesSelection = schedule?.weekStart === requestedWeekStart;
+  const weekStart = scheduleMatchesSelection ? schedule.weekStart : requestedWeekStart;
+  selectedScheduleWeekStart = weekStart;
+  const days = scheduleMatchesSelection && schedule?.days?.length
     ? schedule.days
-    : [
-        { key: "mon", label: "Pon" },
-        { key: "tue", label: "Wt" },
-        { key: "wed", label: "Śr" },
-        { key: "thu", label: "Czw" },
-        { key: "fri", label: "Pt" },
-      ];
-  const rows = schedule?.rows?.length
+    : ["mon", "tue", "wed", "thu", "fri"].map((key, index) => {
+        const date = addDays(localDateFromInput(weekStart) || getWeekStartDate(), index);
+        return {
+          key,
+          label: ["Pon", "Wt", "Śr", "Czw", "Pt"][index],
+          date: formatScheduleDate(formatDateInput(date)),
+          isoDate: formatDateInput(date),
+        };
+      });
+  const rows = scheduleMatchesSelection && schedule?.rows?.length
     ? schedule.rows
     : activePeople().map((person) => ({
         login: person.login,
@@ -2799,24 +3242,46 @@ function renderSchedule() {
     $("#scheduleTable").innerHTML = `<div class="empty-state">Brak aktywnych użytkowników do pokazania w grafiku.</div>`;
     return;
   }
+  const weekInput = $("#scheduleWeekInput");
+  const weekLabel = $("#scheduleWeekLabel");
+  if (weekInput) weekInput.value = weekInputValueFromDate(localDateFromInput(weekStart) || getWeekStartDate());
+  if (weekLabel) weekLabel.textContent = formatScheduleWeekRange(weekStart);
   const canEdit = role === "admin";
   $("#scheduleTable").innerHTML = [
     `<div class="head">Osoba</div>`,
-    ...days.map((day) => `<div class="head">${escapeHtml(day.label)}</div>`),
+    ...days.map(
+      (day) => `
+        <div class="head schedule-date-head">
+          <strong>${escapeHtml(day.date || formatScheduleDate(day.isoDate) || day.label)}</strong>
+          <span>${escapeHtml(day.isoDate || "")}</span>
+        </div>
+      `,
+    ),
     ...rows.flatMap((row) =>
       [
         `<div class="head schedule-person">${escapeHtml(row.name)}</div>`,
         ...days.map((day) => {
           const cell = row.cells?.find((item) => item.day === day.key) || { value: "" };
           const value = cell.value || "";
+          const displayValue = scheduleDisplayValue(value);
+          const cellClass = scheduleCellClass(value);
           return `<div class="schedule-cell">${
             canEdit
-              ? `<input class="schedule-input" data-schedule-user="${escapeHtml(row.login)}" data-schedule-day="${escapeHtml(
+              ? `<button class="schedule-cell-button ${cellClass}" data-schedule-edit type="button" data-schedule-user="${escapeHtml(
+                  row.login,
+                )}" data-schedule-user-name="${escapeHtml(row.name)}" data-schedule-day="${escapeHtml(
                   day.key,
-                )}" value="${escapeHtml(value)}" placeholder="-" aria-label="Grafik ${escapeHtml(row.name)} ${escapeHtml(
-                  day.label,
-                )}" />`
-              : `<span class="${value ? "" : "muted"}">${escapeHtml(value || "-")}</span>`
+                )}" data-schedule-week="${escapeHtml(weekStart)}" value="${escapeHtml(
+                  value,
+                )}" data-schedule-value="${escapeHtml(value)}" data-schedule-label="${escapeHtml(
+                  day.isoDate || day.date || day.label,
+                )}" aria-label="Grafik ${escapeHtml(row.name)} ${escapeHtml(
+                  day.isoDate || day.date || day.label,
+                )}">
+                  <strong>${escapeHtml(displayValue)}</strong>
+                  <span>${value ? "Edytuj" : "Kliknij"}</span>
+                </button>`
+              : `<span class="${value ? "" : "muted"}">${escapeHtml(value ? displayValue : "-")}</span>`
           }</div>`;
         }),
       ]
@@ -2824,25 +3289,117 @@ function renderSchedule() {
   ].join("");
 }
 
-async function saveScheduleCell(input) {
+async function saveScheduleValue({ userLogin, day, weekStart, value }) {
   if (!backendAvailable || role !== "admin") return;
-  const userLogin = input.dataset.scheduleUser;
-  const day = input.dataset.scheduleDay;
-  const value = input.value.trim();
-  input.disabled = true;
   try {
     const result = await apiRequest("/time/schedule", {
       method: "PATCH",
-      body: JSON.stringify({ userLogin, day, value }),
+      body: JSON.stringify({ userLogin, day, value, weekStart }),
     });
     applyTimeSummary(result);
-    showToast("Grafik zapisany", value || "Komórka wyczyszczona.");
+    showToast("Grafik zapisany", value ? scheduleDisplayValue(value) : "Komórka wyczyszczona.");
+    return true;
   } catch (error) {
     showToast("Nie zapisano grafiku", error.message || "Backend odrzucił zmianę.");
     await syncTimeSummaryFromBackend({ silent: true });
+    return false;
+  }
+}
+
+async function saveScheduleCell(input) {
+  const userLogin = input.dataset.scheduleUser;
+  const day = input.dataset.scheduleDay;
+  const weekStart = input.dataset.scheduleWeek || getScheduleWeekStart();
+  const value = input.value.trim();
+  input.disabled = true;
+  try {
+    await saveScheduleValue({ userLogin, day, weekStart, value });
   } finally {
     input.disabled = false;
   }
+}
+
+function updateScheduleEditorMode() {
+  const mode = $("#scheduleEditorMode").value;
+  const workFields = $("#scheduleEditorWorkFields");
+  const startInput = $("#scheduleStartInput");
+  const endInput = $("#scheduleEndInput");
+  const isWork = mode === "work";
+  workFields.classList.toggle("hidden", !isWork);
+  startInput.required = isWork;
+  endInput.required = isWork;
+  if (!isWork) {
+    startInput.value = "";
+    endInput.value = "";
+  }
+}
+
+function openScheduleEditor(button) {
+  if (!button || role !== "admin") return;
+  const value = button.dataset.scheduleValue || "";
+  const parsed = parseScheduleValue(value);
+  activeScheduleEdit = {
+    userLogin: normalizeLogin(button.dataset.scheduleUser),
+    userName: button.dataset.scheduleUserName || "",
+    day: button.dataset.scheduleDay || "",
+    weekStart: button.dataset.scheduleWeek || getScheduleWeekStart(),
+  };
+  $("#scheduleEditorTitle").textContent = activeScheduleEdit.userName || "Edytuj wpis";
+  $("#scheduleEditorContext").textContent = button.dataset.scheduleLabel || "Grafik pracy";
+  $("#scheduleEditorMode").value = parsed.mode;
+  $("#scheduleStartInput").value = parsed.start || "08:00";
+  $("#scheduleEndInput").value = parsed.end || "16:00";
+  updateScheduleEditorMode();
+  openDialog("#scheduleEditorDialog");
+  window.setTimeout(() => {
+    const focusTarget = parsed.mode === "work" ? $("#scheduleStartInput") : $("#scheduleEditorMode");
+    focusTarget?.focus();
+  }, 0);
+}
+
+function scheduleEditorValue() {
+  const mode = $("#scheduleEditorMode").value;
+  if (mode !== "work") return mode;
+  const start = $("#scheduleStartInput").value;
+  const end = $("#scheduleEndInput").value;
+  const startMinutes = timeToMinutes(start);
+  const endMinutes = timeToMinutes(end);
+  if (startMinutes === null || endMinutes === null) {
+    showToast("Uzupełnij godziny", "Wybierz godzinę rozpoczęcia i zakończenia pracy.");
+    return null;
+  }
+  if (endMinutes <= startMinutes) {
+    showToast("Popraw godziny", "Godzina zakończenia musi być późniejsza niż rozpoczęcia.");
+    return null;
+  }
+  return `${start}-${end}`;
+}
+
+async function saveScheduleEditor(event) {
+  event.preventDefault();
+  if (!activeScheduleEdit) return;
+  const value = scheduleEditorValue();
+  if (value === null) return;
+  const saved = await saveScheduleValue({ ...activeScheduleEdit, value });
+  if (saved) $("#scheduleEditorDialog").close();
+}
+
+async function clearScheduleEditor() {
+  if (!activeScheduleEdit) return;
+  const saved = await saveScheduleValue({ ...activeScheduleEdit, value: "" });
+  if (saved) $("#scheduleEditorDialog").close();
+}
+
+async function setScheduleWeek(weekStart) {
+  selectedScheduleWeekStart = formatDateInput(getWeekStartDate(localDateFromInput(weekStart) || getWeekStartDate()));
+  renderSchedule();
+  if (backendAvailable && isLoggedIn()) {
+    await syncTimeSummaryFromBackend({ silent: true, weekStart: selectedScheduleWeekStart });
+  }
+}
+
+async function shiftScheduleWeek(weekDelta) {
+  await setScheduleWeek(addWeeksToDateInput(getScheduleWeekStart(), weekDelta));
 }
 
 function renderCalendar() {
@@ -3271,7 +3828,7 @@ async function openNotificationSource(index) {
 }
 
 async function openFeedItemSource(itemId) {
-  const item = buildActivityFeedItems().find((entry) => entry.id === itemId);
+  const item = getActivityFeedItemById(itemId);
   if (!item) return;
   const target = item.target || {};
   if (target.view === "announcements" && target.postId) {
@@ -3775,6 +4332,12 @@ function renderKnowledge() {
       (article) => {
         const sizeLabel = article.fileSize ? formatFileSize(article.fileSize) : "";
         const fileMeta = [article.fileName, sizeLabel].filter(Boolean).join(" · ");
+        const createdMeta = [
+          article.createdBy ? `Dodał: ${getDisplayNameByLogin(article.createdBy)}` : "",
+          activityTimeLabel(article.createdAt, ""),
+        ]
+          .filter(Boolean)
+          .join(" · ");
         return `
         <article class="kb-card">
           <span class="kb-icon">${escapeHtml(article.type)}</span>
@@ -3784,11 +4347,14 @@ function renderKnowledge() {
               <span class="pill">${escapeHtml(article.type)}</span>
             </div>
             <p class="note">${escapeHtml(article.detail)}</p>
+            ${createdMeta ? `<span class="muted">${escapeHtml(createdMeta)}</span>` : ""}
             <div class="card-line">
               <span class="muted">${escapeHtml(fileMeta || "Brak pliku")}</span>
               ${
                 article.fileUrl
-                  ? `<a class="secondary-button" href="${escapeHtml(article.fileUrl)}" target="_blank" rel="noopener">Otwórz</a>`
+                  ? `<a class="secondary-button" href="${escapeHtml(article.fileUrl)}" download="${escapeHtml(
+                      article.fileName || article.title,
+                    )}">Pobierz</a>`
                   : ""
               }
             </div>
@@ -3856,6 +4422,7 @@ function activateView(viewId) {
       syncRequestsFromBackend({ silent: true }),
       syncCalendarFromBackend({ silent: true }),
       syncKnowledgeFromBackend({ silent: true }),
+      syncQuickPollsFromBackend({ silent: true }),
     ]).then((changes) => {
       if (!changes.some(Boolean)) return;
       renderKanban();
@@ -3863,6 +4430,7 @@ function activateView(viewId) {
       renderReports();
       renderCalendar();
       renderKnowledge();
+      renderQuickPoll();
       renderPosts(currentFeedFilter);
       applyRole();
     });
@@ -4522,10 +5090,15 @@ async function createKnowledgeArticle(event) {
     showToast("Wybierz plik", "Dokument musi zawierać prawdziwy załącznik.");
     return;
   }
+  if (!detail) {
+    showToast("Dodaj opis dokumentu", "Opis pomaga zespołowi znaleźć i poprawnie użyć pliku.");
+    $("#kbDetailInput").focus();
+    return;
+  }
   const articlePayload = {
     type: fileIcon(file.type, file.name),
     title: title || file.name.replace(/\.[^.]+$/, ""),
-    detail: detail || `Dokument dodany z pliku ${file.name}.`,
+    detail,
     fileName: file.name,
     fileMime: file.type,
     fileSize: file.size,
@@ -4554,7 +5127,7 @@ async function createKnowledgeArticle(event) {
   });
   form.reset();
   $("#knowledgeFormDialog").close();
-  renderKnowledge();
+  renderKnowledgeState();
   pushNotification("Baza wiedzy", `Dodano dokument: ${articlePayload.title}`, { view: "knowledge" });
   showToast("Dokument dodany", "Nowa pozycja jest widoczna w bazie wiedzy.");
 }
@@ -4566,8 +5139,10 @@ async function boot() {
   renderMyDay();
   renderPeople();
   renderPosts();
+  renderQuickPoll();
   renderKanban();
   renderSchedule();
+  renderWageCalculator();
   renderCalendar();
   renderRequests();
   renderReports();
@@ -4615,6 +5190,8 @@ async function boot() {
   $("#addEventButton").addEventListener("click", openCalendarForm);
   $("#calendarForm").addEventListener("submit", createCalendarEvent);
   $("#addKnowledgeButton").addEventListener("click", openKnowledgeForm);
+  $("#addPollButton").addEventListener("click", openPollForm);
+  $("#pollForm").addEventListener("submit", createQuickPoll);
   $("#announcementForm").addEventListener("submit", createPost);
   $("#postCommentForm").addEventListener("submit", createPostComment);
   $("#leaveForm").addEventListener("submit", createLeaveRequest);
@@ -4666,6 +5243,23 @@ async function boot() {
     showToast("Powiadomienia odczytane");
   });
   $("#exportTimeButton").addEventListener("click", exportTimeCsv);
+  $("#scheduleEditorForm").addEventListener("submit", saveScheduleEditor);
+  $("#scheduleEditorMode").addEventListener("change", updateScheduleEditorMode);
+  $("#scheduleClearButton").addEventListener("click", clearScheduleEditor);
+  $("#schedulePrevWeek").addEventListener("click", () => shiftScheduleWeek(-1));
+  $("#scheduleNextWeek").addEventListener("click", () => shiftScheduleWeek(1));
+  $("#scheduleCurrentWeek").addEventListener("click", () => setScheduleWeek(formatDateInput(getWeekStartDate())));
+  $("#scheduleWeekInput").addEventListener("change", (event) => setScheduleWeek(weekStartFromWeekInput(event.target.value)));
+  $("#wageUserSelect").addEventListener("change", (event) => {
+    selectedWageLogin = normalizeLogin(event.target.value || getActiveLogin());
+    renderWageCalculator();
+  });
+  $("#wageRateInput").addEventListener("input", (event) => {
+    const rate = Math.max(0, Number(event.target.value.replace(",", ".")) || 0);
+    wageRates[selectedWageLogin || getActiveLogin()] = rate;
+    saveWageRates();
+    renderWageCalculator();
+  });
   $("#correctionButton").addEventListener("click", async () => {
     const title = `Korekta czasu: ${getActiveName()}`;
     const detail = "Dzisiaj · zapomniałem wybić się o 17:00";
@@ -4744,9 +5338,44 @@ async function boot() {
       return;
     }
 
-    const feedButton = event.target.closest("[data-feed-item]");
-    if (feedButton) {
-      await openFeedItemSource(feedButton.dataset.feedItem);
+    const scheduleEditButton = event.target.closest("[data-schedule-edit]");
+    if (scheduleEditButton) {
+      openScheduleEditor(scheduleEditButton);
+      return;
+    }
+
+    const feedSourceButton = event.target.closest("[data-feed-source], [data-feed-item]");
+    if (feedSourceButton) {
+      await openFeedItemSource(feedSourceButton.dataset.feedSource || feedSourceButton.dataset.feedItem);
+      return;
+    }
+
+    const feedDetailButton = event.target.closest("[data-feed-detail]");
+    if (feedDetailButton) {
+      openFeedItemDetails(feedDetailButton.dataset.feedDetail);
+      return;
+    }
+
+    const feedDialogSourceButton = event.target.closest("[data-feed-dialog-source]");
+    if (feedDialogSourceButton) {
+      feedDialogSourceButton.closest("dialog")?.close();
+      await openFeedItemSource(activeFeedItemId);
+      return;
+    }
+
+    const quickReportButton = event.target.closest("[data-quick-report]");
+    if (quickReportButton) {
+      activateView("reports");
+      window.setTimeout(() => $("#reportText")?.focus(), 0);
+      showToast("Nowe zgłoszenie", "Uzupełnij zgłoszenie w panelu.");
+      return;
+    }
+
+    const quickAnnouncementButton = event.target.closest("[data-quick-announcement]");
+    if (quickAnnouncementButton) {
+      activateView("announcements");
+      window.setTimeout(() => $("#postTitle")?.focus(), 0);
+      showToast("Nowe ogłoszenie", "Uzupełnij ogłoszenie w formularzu.");
       return;
     }
 
@@ -4973,10 +5602,7 @@ async function boot() {
 
     const pollButton = event.target.closest("[data-poll-vote]");
     if (pollButton) {
-      $("#pollMeter").style.width = pollButton.dataset.pollVote === "yes" ? "75%" : "68%";
-      $("#pollResult").textContent =
-        pollButton.dataset.pollVote === "yes" ? "Głos zapisany: możesz przyjść" : "Głos zapisany: nie możesz przyjść";
-      showToast("Głos zapisany", "Wynik ankiety został zaktualizowany.");
+      await voteQuickPoll(pollButton.dataset.pollVote, Number(pollButton.dataset.pollOption));
       return;
     }
 
@@ -5096,6 +5722,7 @@ async function boot() {
       pollRequests();
       pollCalendar();
       pollKnowledge();
+      pollQuickPolls();
       pollChatMessages();
       refreshPresence();
     }
@@ -5108,6 +5735,7 @@ async function boot() {
     pollRequests();
     pollCalendar();
     pollKnowledge();
+    pollQuickPolls();
     pollChatMessages();
     refreshPresence();
   });

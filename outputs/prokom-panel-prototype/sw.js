@@ -1,10 +1,10 @@
-const CACHE_NAME = "prokom-panel-app-v57";
+const CACHE_NAME = "prokom-panel-app-v64";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=57",
-  "./data.js?v=57",
-  "./app.js?v=57",
+  "./styles.css?v=64",
+  "./data.js?v=64",
+  "./app.js?v=64",
   "./manifest.webmanifest",
 ];
 
@@ -23,5 +23,21 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request)),
+  );
 });

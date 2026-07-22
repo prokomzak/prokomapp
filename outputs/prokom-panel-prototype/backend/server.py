@@ -45,6 +45,7 @@ APP_ACCOUNT_ROSTER_MIGRATION_KEY = "app_account_roster_2026_07_21"
 TADEUSZ_TITLE_MIGRATION_KEY = "tadeusz_title_szef_2026_07_22"
 KNOWLEDGE_CONTENT_MIGRATION_KEY = "knowledge_content_real_docs_2026_07_21"
 LEGACY_CONTENT_MIGRATION_KEY = "legacy_content_cleanup_2026_07_21"
+WEEKLY_SCHEDULE_MIGRATION_KEY = "weekly_schedule_current_week_2026_07_22"
 MAX_KNOWLEDGE_UPLOAD_BYTES = 25 * 1024 * 1024
 WORK_DAYS = (
     ("mon", "Pon"),
@@ -54,6 +55,7 @@ WORK_DAYS = (
     ("fri", "Pt"),
 )
 WORK_DAY_KEYS = {key for key, _label in WORK_DAYS}
+WORK_DAY_INDEX = {key: index for index, (key, _label) in enumerate(WORK_DAYS)}
 
 SEED_USERS = [
     {
@@ -186,6 +188,34 @@ def local_period_starts(now: datetime) -> tuple[datetime, datetime, datetime]:
         week_local.astimezone(timezone.utc),
         month_local.astimezone(timezone.utc),
     )
+
+
+def normalize_week_start(value: str | None = None) -> str:
+    if value:
+        try:
+            selected = datetime.strptime(value[:10], "%Y-%m-%d").date()
+        except ValueError:
+            selected = datetime.now().astimezone().date()
+    else:
+        selected = datetime.now().astimezone().date()
+    monday = selected - timedelta(days=selected.weekday())
+    return monday.strftime("%Y-%m-%d")
+
+
+def schedule_week_days(week_start: str) -> list[dict]:
+    start = datetime.strptime(week_start, "%Y-%m-%d").date()
+    days = []
+    for index, (key, label) in enumerate(WORK_DAYS):
+        current = start + timedelta(days=index)
+        days.append(
+            {
+                "key": key,
+                "label": label,
+                "date": current.strftime("%d.%m"),
+                "isoDate": current.strftime("%Y-%m-%d"),
+            }
+        )
+    return days
 
 
 def seconds_between(start: datetime | None, end: datetime | None) -> int:
@@ -567,6 +597,51 @@ def migrate_legacy_content(conn: sqlite3.Connection) -> None:
     )
 
 
+def migrate_weekly_schedule(conn: sqlite3.Connection) -> None:
+    already_done = conn.execute(
+        "SELECT value FROM database_meta WHERE key = ?",
+        (WEEKLY_SCHEDULE_MIGRATION_KEY,),
+    ).fetchone()
+    if already_done:
+        return
+
+    current_week_start = normalize_week_start()
+    rows = conn.execute("SELECT * FROM work_schedules").fetchall()
+    copied = 0
+    for row in rows:
+        cursor = conn.execute(
+            """
+            INSERT INTO work_schedule_weeks(
+              user_login, week_start, day_key, start_time, end_time, note, updated_by, updated_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_login, week_start, day_key) DO NOTHING
+            """,
+            (
+                row["user_login"],
+                current_week_start,
+                row["day_key"],
+                row["start_time"],
+                row["end_time"],
+                row["note"] or "",
+                row["updated_by"],
+                row["updated_at"],
+            ),
+        )
+        if cursor.rowcount:
+            copied += 1
+
+    conn.execute(
+        "INSERT INTO audit_log(actor_login, action, details) VALUES(NULL, 'MIGRATE_WEEKLY_SCHEDULE', ?)",
+        (f"Copied {copied} legacy schedule cells to week {current_week_start}.",),
+    )
+    conn.execute(
+        "INSERT INTO database_meta(key, value) VALUES(?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (WEEKLY_SCHEDULE_MIGRATION_KEY, now_text()),
+    )
+
+
 def initialize_database() -> None:
     with connect() as conn:
         conn.executescript(
@@ -632,6 +707,20 @@ def initialize_database() -> None:
               updated_by TEXT,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               PRIMARY KEY (user_login, day_key),
+              FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE,
+              FOREIGN KEY (updated_by) REFERENCES users(login) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS work_schedule_weeks (
+              user_login TEXT NOT NULL,
+              week_start TEXT NOT NULL,
+              day_key TEXT NOT NULL CHECK (day_key IN ('mon', 'tue', 'wed', 'thu', 'fri')),
+              start_time TEXT,
+              end_time TEXT,
+              note TEXT NOT NULL DEFAULT '',
+              updated_by TEXT,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (user_login, week_start, day_key),
               FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE,
               FOREIGN KEY (updated_by) REFERENCES users(login) ON DELETE SET NULL
             );
@@ -838,6 +927,25 @@ def initialize_database() -> None:
               FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS quick_polls (
+              id TEXT PRIMARY KEY,
+              question TEXT NOT NULL,
+              options_json TEXT NOT NULL,
+              created_by TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (created_by) REFERENCES users(login) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS quick_poll_votes (
+              poll_id TEXT NOT NULL,
+              user_login TEXT NOT NULL,
+              option_index INTEGER NOT NULL,
+              voted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (poll_id, user_login),
+              FOREIGN KEY (poll_id) REFERENCES quick_polls(id) ON DELETE CASCADE,
+              FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
             CREATE INDEX IF NOT EXISTS idx_users_role ON users(app_role);
             CREATE INDEX IF NOT EXISTS idx_permissions_permission ON user_permissions(permission);
@@ -845,6 +953,7 @@ def initialize_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_time_sessions_user_started ON time_sessions(user_login, started_at);
             CREATE INDEX IF NOT EXISTS idx_time_sessions_open ON time_sessions(user_login, ended_at);
             CREATE INDEX IF NOT EXISTS idx_work_schedules_day ON work_schedules(day_key);
+            CREATE INDEX IF NOT EXISTS idx_work_schedule_weeks_week ON work_schedule_weeks(week_start, day_key);
             CREATE INDEX IF NOT EXISTS idx_chat_group_members_user ON chat_group_members(user_login);
             CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_chat_message_reads_reader ON chat_message_reads(reader_login, read_at);
@@ -863,6 +972,8 @@ def initialize_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_knowledge_articles_created ON knowledge_articles(created_at);
             CREATE INDEX IF NOT EXISTS idx_handover_notes_created ON handover_notes(created_at);
             CREATE INDEX IF NOT EXISTS idx_handover_accepts_user ON handover_accepts(user_login, accepted_at);
+            CREATE INDEX IF NOT EXISTS idx_quick_polls_created ON quick_polls(created_at);
+            CREATE INDEX IF NOT EXISTS idx_quick_poll_votes_user ON quick_poll_votes(user_login, voted_at);
             """
         )
         meta = {
@@ -871,7 +982,7 @@ def initialize_database() -> None:
             "database_role": "LAN server local file",
             "planned_lan_ip": "192.168.1.101",
             "backend": "python-standard-library",
-            "schema_version": "14",
+            "schema_version": "18",
         }
         for key, value in meta.items():
             conn.execute(
@@ -920,6 +1031,7 @@ def initialize_database() -> None:
         migrate_tadeusz_title(conn)
         migrate_knowledge_content(conn)
         migrate_legacy_content(conn)
+        migrate_weekly_schedule(conn)
         seed_announcements(conn)
         seed_tasks(conn)
         seed_reports(conn)
@@ -1374,17 +1486,56 @@ def add_break_seconds(conn: sqlite3.Connection, session: sqlite3.Row, ended_at: 
     )
 
 
-def schedule_rows_map(conn: sqlite3.Connection) -> dict[tuple[str, str], sqlite3.Row]:
-    rows = conn.execute("SELECT * FROM work_schedules").fetchall()
+def schedule_rows_map(conn: sqlite3.Connection, week_start: str | None = None) -> dict[tuple[str, str], sqlite3.Row]:
+    if week_start:
+        rows = conn.execute(
+            "SELECT * FROM work_schedule_weeks WHERE week_start = ?",
+            (week_start,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM work_schedules").fetchall()
     return {(row["user_login"], row["day_key"]): row for row in rows}
 
 
-def schedule_snapshot(conn: sqlite3.Connection, users: list[sqlite3.Row]) -> dict:
-    schedules = schedule_rows_map(conn)
+def scheduled_month_seconds(conn: sqlite3.Connection, month_start: datetime) -> dict[str, int]:
+    local_month_start = month_start.astimezone().date().replace(day=1)
+    if local_month_start.month == 12:
+        next_month = local_month_start.replace(year=local_month_start.year + 1, month=1)
+    else:
+        next_month = local_month_start.replace(month=local_month_start.month + 1)
+    query_start = (local_month_start - timedelta(days=6)).strftime("%Y-%m-%d")
+    query_end = next_month.strftime("%Y-%m-%d")
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM work_schedule_weeks
+        WHERE week_start >= ? AND week_start < ?
+        """,
+        (query_start, query_end),
+    ).fetchall()
+    totals: dict[str, int] = {}
+    for row in rows:
+        day_offset = WORK_DAY_INDEX.get(row["day_key"])
+        if day_offset is None:
+            continue
+        try:
+            day_date = datetime.strptime(row["week_start"], "%Y-%m-%d").date() + timedelta(days=day_offset)
+        except ValueError:
+            continue
+        if local_month_start <= day_date < next_month:
+            totals[row["user_login"]] = totals.get(row["user_login"], 0) + schedule_cell_seconds(row)
+    return totals
+
+
+def schedule_snapshot(conn: sqlite3.Connection, users: list[sqlite3.Row], week_start: str | None = None) -> dict:
+    selected_week_start = normalize_week_start(week_start)
+    schedules = schedule_rows_map(conn, selected_week_start)
+    days = schedule_week_days(selected_week_start)
     rows = []
     for user in users:
         cells = []
-        for day_key, label in WORK_DAYS:
+        for day in days:
+            day_key = day["key"]
             cell = schedules.get((user["login"], day_key))
             start_time = cell["start_time"] if cell else ""
             end_time = cell["end_time"] if cell else ""
@@ -1393,7 +1544,9 @@ def schedule_snapshot(conn: sqlite3.Connection, users: list[sqlite3.Row]) -> dic
             cells.append(
                 {
                     "day": day_key,
-                    "label": label,
+                    "label": day["label"],
+                    "date": day["date"],
+                    "isoDate": day["isoDate"],
                     "startTime": start_time or "",
                     "endTime": end_time or "",
                     "note": note or "",
@@ -1408,10 +1561,11 @@ def schedule_snapshot(conn: sqlite3.Connection, users: list[sqlite3.Row]) -> dic
                 "cells": cells,
             }
         )
-    return {"days": [{"key": key, "label": label} for key, label in WORK_DAYS], "rows": rows}
+    week_end = (datetime.strptime(selected_week_start, "%Y-%m-%d").date() + timedelta(days=4)).strftime("%Y-%m-%d")
+    return {"weekStart": selected_week_start, "weekEnd": week_end, "days": days, "rows": rows}
 
 
-def time_summary(conn: sqlite3.Connection, user: sqlite3.Row) -> dict:
+def time_summary(conn: sqlite3.Connection, user: sqlite3.Row, schedule_week_start: str | None = None) -> dict:
     now = utc_now()
     now_iso = iso_from_dt(now)
     today_start, week_start, month_start = local_period_starts(now)
@@ -1445,6 +1599,7 @@ def time_summary(conn: sqlite3.Connection, user: sqlite3.Row) -> dict:
     range_end = now
     people_stats = []
     company_today = company_week = company_month = 0
+    scheduled_month_totals = scheduled_month_seconds(conn, month_start)
     for person in people:
         user_sessions = sessions_by_user.get(person["login"], [])
         today_seconds = sum(session_seconds(session, today_start, range_end, now) for session in user_sessions)
@@ -1453,13 +1608,21 @@ def time_summary(conn: sqlite3.Connection, user: sqlite3.Row) -> dict:
         company_today += today_seconds
         company_week += week_seconds
         company_month += month_seconds
-        people_stats.append({**person, "todaySeconds": today_seconds, "weekSeconds": week_seconds, "monthSeconds": month_seconds})
+        people_stats.append({
+            **person,
+            "todaySeconds": today_seconds,
+            "weekSeconds": week_seconds,
+            "monthSeconds": month_seconds,
+            "scheduledMonthSeconds": scheduled_month_totals.get(person["login"], 0),
+        })
 
-    schedule = schedule_snapshot(conn, users)
+    selected_schedule_week_start = normalize_week_start(schedule_week_start)
+    current_schedule_week_start = normalize_week_start(datetime.now().astimezone().strftime("%Y-%m-%d"))
+    schedule = schedule_snapshot(conn, users, selected_schedule_week_start)
     current_day_key = WORK_DAYS[datetime.now().astimezone().weekday()][0] if datetime.now().astimezone().weekday() < 5 else None
     scheduled_today_logins: set[str] = set()
     scheduled_week_seconds = 0
-    schedules = schedule_rows_map(conn)
+    schedules = schedule_rows_map(conn, current_schedule_week_start)
     for schedule_row in schedules.values():
         if schedule_row["day_key"] in WORK_DAY_KEYS:
             scheduled_week_seconds += schedule_cell_seconds(schedule_row)
@@ -1480,11 +1643,12 @@ def time_summary(conn: sqlite3.Connection, user: sqlite3.Row) -> dict:
                     "todaySeconds": stat["todaySeconds"],
                     "weekSeconds": stat["weekSeconds"],
                     "monthSeconds": stat["monthSeconds"],
+                    "scheduledMonthSeconds": stat["scheduledMonthSeconds"],
                 }
                 for stat in people_stats
                 if stat["login"] == user["login"]
             ),
-            {"todaySeconds": 0, "weekSeconds": 0, "monthSeconds": 0},
+            {"todaySeconds": 0, "weekSeconds": 0, "monthSeconds": 0, "scheduledMonthSeconds": 0},
         ),
         "pulse": {
             "workingNow": working_now,
@@ -1779,6 +1943,45 @@ def knowledge_snapshot(conn: sqlite3.Connection, user: sqlite3.Row) -> dict:
     }
 
 
+def quick_poll_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    try:
+        options = json.loads(row["options_json"] or "[]")
+    except json.JSONDecodeError:
+        options = []
+    if not isinstance(options, list):
+        options = []
+    option_labels = [str(option).strip() for option in options if str(option).strip()]
+    vote_rows = conn.execute(
+        "SELECT user_login, option_index FROM quick_poll_votes WHERE poll_id = ?",
+        (row["id"],),
+    ).fetchall()
+    votes = {
+        vote["user_login"]: int(vote["option_index"])
+        for vote in vote_rows
+        if 0 <= int(vote["option_index"]) < len(option_labels)
+    }
+    return {
+        "id": row["id"],
+        "question": row["question"],
+        "options": option_labels,
+        "votes": votes,
+        "createdBy": row["created_by"] or "",
+        "createdAt": row["created_at"],
+    }
+
+
+def quick_polls_snapshot(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM quick_polls
+        ORDER BY created_at DESC, question COLLATE NOCASE
+        LIMIT 20
+        """
+    ).fetchall()
+    return {"polls": [quick_poll_payload(conn, row) for row in rows]}
+
+
 def chat_group_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     members = conn.execute(
         "SELECT user_login FROM chat_group_members WHERE group_id = ? ORDER BY user_login COLLATE NOCASE",
@@ -1998,7 +2201,8 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if not user:
                         self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
                         return
-                    self.send_json(time_summary(conn, user))
+                    params = parse_qs(query)
+                    self.send_json(time_summary(conn, user, params.get("weekStart", [""])[0]))
                     return
                 if path == "/api/time/schedule" and method in ("POST", "PATCH"):
                     actor = self.require_admin(conn)
@@ -2210,6 +2414,30 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if len(parts) == 1 and method == "DELETE":
                         self.delete_handover_note(conn, user, parts[0])
                         return
+                if path == "/api/polls" and method == "GET":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.send_json(quick_polls_snapshot(conn))
+                    return
+                if path == "/api/polls" and method == "POST":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.create_quick_poll(conn, user)
+                    return
+                if path.startswith("/api/polls/"):
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    tail = path.removeprefix("/api/polls/")
+                    parts = [unquote(part) for part in tail.split("/") if part]
+                    if len(parts) == 2 and method == "POST" and parts[1] == "vote":
+                        self.vote_quick_poll(conn, user, parts[0])
+                        return
                 if path == "/api/chat/groups" and method == "GET":
                     user = self.current_user(conn)
                     if not user:
@@ -2357,6 +2585,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
         payload = self.read_json()
         user_login = normalize_login(str(payload.get("userLogin", "")))
         day_key = str(payload.get("day", "")).strip().lower()
+        week_start = normalize_week_start(str(payload.get("weekStart", "")).strip() or None)
         value = str(payload.get("value", "")).strip()
         if day_key not in WORK_DAY_KEYS:
             self.send_json({"error": "Nieznany dzien grafiku."}, HTTPStatus.BAD_REQUEST)
@@ -2368,14 +2597,14 @@ class ProkomHandler(BaseHTTPRequestHandler):
 
         if not value:
             conn.execute(
-                "DELETE FROM work_schedules WHERE user_login = ? AND day_key = ?",
-                (user_login, day_key),
+                "DELETE FROM work_schedule_weeks WHERE user_login = ? AND week_start = ? AND day_key = ?",
+                (user_login, week_start, day_key),
             )
             conn.execute(
                 "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CLEAR_SCHEDULE', ?)",
-                (actor["login"], f"{user_login}:{day_key}"),
+                (actor["login"], f"{user_login}:{week_start}:{day_key}"),
             )
-            self.send_json(time_summary(conn, actor))
+            self.send_json(time_summary(conn, actor, week_start))
             return
 
         normalized_value = value.replace("–", "-").replace("—", "-")
@@ -2397,22 +2626,22 @@ class ProkomHandler(BaseHTTPRequestHandler):
         now = now_text()
         conn.execute(
             """
-            INSERT INTO work_schedules(user_login, day_key, start_time, end_time, note, updated_by, updated_at)
-            VALUES(?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_login, day_key) DO UPDATE SET
+            INSERT INTO work_schedule_weeks(user_login, week_start, day_key, start_time, end_time, note, updated_by, updated_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_login, week_start, day_key) DO UPDATE SET
               start_time = excluded.start_time,
               end_time = excluded.end_time,
               note = excluded.note,
               updated_by = excluded.updated_by,
               updated_at = excluded.updated_at
             """,
-            (user_login, day_key, start_time or None, end_time or None, note, actor["login"], now),
+            (user_login, week_start, day_key, start_time or None, end_time or None, note, actor["login"], now),
         )
         conn.execute(
             "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'UPDATE_SCHEDULE', ?)",
-            (actor["login"], f"{user_login}:{day_key}:{value}"),
+            (actor["login"], f"{user_login}:{week_start}:{day_key}:{value}"),
         )
-        self.send_json(time_summary(conn, actor))
+        self.send_json(time_summary(conn, actor, week_start))
 
     def create_user(self, conn: sqlite3.Connection, actor: sqlite3.Row) -> None:
         payload = self.read_json()
@@ -3167,10 +3396,6 @@ class ProkomHandler(BaseHTTPRequestHandler):
         self.send_json(response)
 
     def create_knowledge_article(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
-        if user["app_role"] not in ("root", "admin"):
-            self.send_json({"error": "Artykuly bazy wiedzy moze dodawac tylko administrator."}, HTTPStatus.FORBIDDEN)
-            return
-
         content_type = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in content_type:
             self.read_json()
@@ -3184,6 +3409,9 @@ class ProkomHandler(BaseHTTPRequestHandler):
         upload = files.get("document")
         title = str(fields.get("title", "")).strip()
         detail = str(fields.get("detail", "")).strip()
+        if not detail:
+            self.send_json({"error": "Dodaj opis dokumentu."}, HTTPStatus.BAD_REQUEST)
+            return
         if not upload or not upload.get("content"):
             self.send_json({"error": "Wybierz plik dokumentu."}, HTTPStatus.BAD_REQUEST)
             return
@@ -3195,8 +3423,6 @@ class ProkomHandler(BaseHTTPRequestHandler):
         file_mime = str(upload.get("mime") or mimetypes.guess_type(file_name)[0] or "application/octet-stream")
         if not title:
             title = Path(file_name).stem or file_name
-        if not detail:
-            detail = f"Dokument dodany z pliku {file_name}."
         article_type = str(fields.get("type", "")).strip().upper()[:12] or knowledge_type_from_file(file_mime, file_name)
         article_id = f"kb-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
         stored_name = storage_filename(article_id, file_name)
@@ -3323,6 +3549,77 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (user["login"], note_id),
         )
         self.send_json(knowledge_snapshot(conn, user))
+
+    def create_quick_poll(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
+        payload = self.read_json()
+        question = str(payload.get("question", "")).strip()
+        raw_options = payload.get("options", [])
+        if not isinstance(raw_options, list):
+            raw_options = []
+        options = [str(option).strip() for option in raw_options if str(option).strip()][:4]
+        normalized_options = {normalize_login(option) for option in options}
+        if not question:
+            self.send_json({"error": "Podaj pytanie ankiety."}, HTTPStatus.BAD_REQUEST)
+            return
+        if len(options) < 2 or len(normalized_options) < 2:
+            self.send_json({"error": "Ankieta wymaga co najmniej dwoch roznych odpowiedzi."}, HTTPStatus.BAD_REQUEST)
+            return
+        poll_id = f"poll-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        conn.execute(
+            """
+            INSERT INTO quick_polls(id, question, options_json, created_by, created_at)
+            VALUES(?, ?, ?, ?, ?)
+            """,
+            (poll_id, question, json.dumps(options, ensure_ascii=False), user["login"], now_text()),
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_POLL', ?)",
+            (user["login"], poll_id),
+        )
+        response = quick_polls_snapshot(conn)
+        response["poll"] = quick_poll_payload(
+            conn,
+            conn.execute("SELECT * FROM quick_polls WHERE id = ?", (poll_id,)).fetchone(),
+        )
+        self.send_json(response, HTTPStatus.CREATED)
+
+    def vote_quick_poll(self, conn: sqlite3.Connection, user: sqlite3.Row, poll_id: str) -> None:
+        poll = conn.execute("SELECT * FROM quick_polls WHERE id = ?", (poll_id,)).fetchone()
+        if not poll:
+            self.send_json({"error": "Nie znaleziono ankiety."}, HTTPStatus.NOT_FOUND)
+            return
+        payload = self.read_json()
+        try:
+            option_index = int(payload.get("optionIndex", -1))
+        except (TypeError, ValueError):
+            option_index = -1
+        try:
+            options = json.loads(poll["options_json"] or "[]")
+        except json.JSONDecodeError:
+            options = []
+        if not isinstance(options, list):
+            options = []
+        options = [str(option).strip() for option in options if str(option).strip()]
+        if option_index < 0 or option_index >= len(options):
+            self.send_json({"error": "Nieprawidlowa odpowiedz ankiety."}, HTTPStatus.BAD_REQUEST)
+            return
+        conn.execute(
+            """
+            INSERT INTO quick_poll_votes(poll_id, user_login, option_index, voted_at)
+            VALUES(?, ?, ?, ?)
+            ON CONFLICT(poll_id, user_login) DO UPDATE SET
+              option_index = excluded.option_index,
+              voted_at = excluded.voted_at
+            """,
+            (poll_id, user["login"], option_index, now_text()),
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'VOTE_POLL', ?)",
+            (user["login"], poll_id),
+        )
+        response = quick_polls_snapshot(conn)
+        response["poll"] = quick_poll_payload(conn, poll)
+        self.send_json(response)
 
     def create_chat_group(self, conn: sqlite3.Connection, actor: sqlite3.Row) -> None:
         payload = self.read_json()

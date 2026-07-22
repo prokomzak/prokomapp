@@ -448,6 +448,23 @@ textarea {
   flex-wrap: wrap;
 }
 
+.schedule-tools {
+  justify-content: flex-start;
+}
+
+.week-picker {
+  display: grid;
+  gap: 4px;
+  min-width: 160px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.week-picker input {
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -671,7 +688,25 @@ textarea {
   margin-bottom: 0;
 }
 
-.feed-card > button,
+.quick-board-actions,
+.feed-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-board-actions {
+  margin-bottom: 12px;
+}
+
+.feed-card-actions {
+  margin-top: 4px;
+}
+
+.feed-card-actions button {
+  min-height: 36px;
+}
+
 .announcement-card > button {
   justify-self: start;
   padding: 0;
@@ -1099,6 +1134,21 @@ legend {
   font-weight: 800;
 }
 
+.schedule-date-head {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+}
+
+.schedule-date-head strong {
+  font-size: 0.96rem;
+}
+
+.schedule-date-head span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .schedule-person {
   display: flex;
   align-items: center;
@@ -1107,6 +1157,48 @@ legend {
 .schedule-cell {
   display: flex;
   align-items: center;
+}
+
+.schedule-cell-button {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.schedule-cell-button:hover {
+  border-color: color-mix(in srgb, var(--teal), var(--line) 38%);
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.1);
+}
+
+.schedule-cell-button strong {
+  font-size: 0.9rem;
+  line-height: 1.1;
+}
+
+.schedule-cell-button span {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.schedule-cell-button.empty strong {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.schedule-cell-button.note {
+  background: color-mix(in srgb, var(--surface-soft), var(--surface) 34%);
+}
+
+.schedule-cell-button.work {
+  border-color: color-mix(in srgb, var(--green), var(--line) 48%);
 }
 
 .schedule-input {
@@ -1129,6 +1221,18 @@ legend {
 
 .schedule-input:disabled {
   opacity: 0.65;
+}
+
+.wage-panel {
+  align-self: start;
+}
+
+.wage-form {
+  margin-bottom: 14px;
+}
+
+.wage-summary {
+  grid-template-columns: 1fr;
 }
 
 .calendar-grid {
@@ -1319,6 +1423,51 @@ legend {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.quick-poll-widget {
+  align-content: start;
+}
+
+.poll-card {
+  display: grid;
+  gap: 10px;
+}
+
+.poll-options {
+  display: grid;
+  gap: 8px;
+}
+
+.poll-option {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.poll-option.active {
+  border-color: color-mix(in srgb, var(--green), var(--line) 35%);
+  background: color-mix(in srgb, var(--surface), var(--green) 6%);
+}
+
+.poll-option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.poll-option-row span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  white-space: nowrap;
 }
 
 .poll-meter {
@@ -2079,6 +2228,17 @@ legend {
     grid-template-columns: 1fr;
   }
 
+  .schedule-tools {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .week-picker {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
   .schedule-table {
     grid-template-columns: 88px repeat(5, 102px);
     overflow-x: auto;
@@ -2105,6 +2265,15 @@ legend {
     min-height: 34px;
     padding: 7px 8px;
     font-size: 0.84rem;
+  }
+
+  .schedule-cell-button {
+    min-height: 42px;
+    padding: 7px;
+  }
+
+  .schedule-cell-button strong {
+    font-size: 0.82rem;
   }
 
   #leaveForm {
@@ -2191,6 +2360,21 @@ legend {
   .comment-form,
   .poll-actions {
     grid-template-columns: 1fr;
+  }
+
+  .quick-board-actions,
+  .feed-card-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .poll-option-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .poll-option-row span {
+    white-space: normal;
   }
 
   .chat-layout {

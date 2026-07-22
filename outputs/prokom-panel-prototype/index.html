@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f766e" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=57" />
+    <link rel="stylesheet" href="styles.css?v=64" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -122,13 +122,17 @@
           <div class="dashboard-grid" id="dashboardGrid">
             <article class="widget wide feature-feed-widget" draggable="true">
               <header class="widget-header">
-                <h3>Strumień</h3>
+                <h3>Tablica</h3>
                 <div class="segmented">
                   <button class="active" data-feed-filter="all" type="button">Wszystkie</button>
                   <button data-feed-filter="boss" type="button">Od szefa</button>
                   <button data-feed-filter="unread" type="button">Do uwagi</button>
                 </div>
               </header>
+              <div class="quick-board-actions" aria-label="Szybkie dodawanie">
+                <button class="secondary-button" data-quick-report type="button">Dodaj zgłoszenie</button>
+                <button class="secondary-button" data-quick-announcement type="button">Dodaj ogłoszenie</button>
+              </div>
               <div class="feed-list" id="feedList"></div>
             </article>
 
@@ -186,14 +190,12 @@
               <p class="kudos muted">Brak wyróżnień w tym tygodniu.</p>
             </article>
 
-            <article class="widget">
+            <article class="widget quick-poll-widget">
               <header class="widget-header">
-                <h3>Szybka ankieta</h3>
-                <span class="pill teal">Brak</span>
+                <h3>Szybkie ankiety</h3>
+                <button class="secondary-button" id="addPollButton" type="button">Dodaj</button>
               </header>
-              <p class="note">Brak aktywnej ankiety.</p>
-              <div class="poll-meter"><span id="pollMeter" style="width: 0%"></span></div>
-              <span class="muted" id="pollResult">Brak głosów</span>
+              <div id="quickPollBox"></div>
             </article>
           </div>
         </section>
@@ -296,11 +298,38 @@
             <article class="panel wide-panel">
               <header class="panel-header">
                 <h2>Grafik pracy</h2>
-                <button class="secondary-button admin-only" id="exportTimeButton" type="button">Eksport CSV</button>
+                <div class="panel-actions schedule-tools">
+                  <button class="secondary-button" id="schedulePrevWeek" type="button">Poprzedni</button>
+                  <label class="week-picker">Tydzień<input id="scheduleWeekInput" type="week" /></label>
+                  <button class="secondary-button" id="scheduleCurrentWeek" type="button">Bieżący</button>
+                  <button class="secondary-button" id="scheduleNextWeek" type="button">Następny</button>
+                  <button class="secondary-button admin-only" id="exportTimeButton" type="button">Eksport CSV</button>
+                </div>
               </header>
-              <p class="muted admin-only" id="scheduleHelp">Admin może edytować komórki w formacie 08:00-16:00, wolne, urlop, L4 lub szkolenie.</p>
+              <span class="pill teal" id="scheduleWeekLabel">Obecny tydzień</span>
+              <p class="muted admin-only" id="scheduleHelp">Admin klika komórkę grafiku i wybiera godziny lub typ nieobecności.</p>
               <p class="muted" id="exportStatus">Ostatni eksport: jeszcze nie wygenerowano</p>
               <div class="schedule-table" id="scheduleTable"></div>
+            </article>
+
+            <article class="panel wage-panel">
+              <header class="panel-header">
+                <h2>Kalkulator stawki</h2>
+                <span class="pill teal" id="wageMonthLabel">Obecny miesiąc</span>
+              </header>
+              <div class="form-row wage-form">
+                <label>Pracownik
+                  <select id="wageUserSelect"></select>
+                </label>
+                <label>Stawka godzinowa
+                  <input id="wageRateInput" type="number" min="0" step="0.01" placeholder="0,00" />
+                </label>
+              </div>
+              <div class="stats-row wage-summary">
+                <div><span>Godziny z grafiku</span><strong id="wageMonthHours">0h 00m</strong></div>
+                <div><span>Stawka</span><strong id="wageRateDisplay">0,00 zł/h</strong></div>
+                <div><span>Zarobek</span><strong id="wageTotalDisplay">0,00 zł</strong></div>
+              </div>
             </article>
 
             <form class="panel form-panel" id="leaveForm">
@@ -432,7 +461,7 @@
                 <h2>Baza wiedzy</h2>
                 <div class="panel-actions">
                   <span class="pill" id="kbSearchCount">0 dokumentów</span>
-                  <button class="primary-button admin-only" id="addKnowledgeButton" type="button">Dodaj dokument</button>
+                  <button class="primary-button" id="addKnowledgeButton" type="button">Dodaj dokument</button>
                 </div>
               </header>
               <label class="kb-search">Szukaj dokumentów<input id="kbSearchInput" type="search" placeholder="Nazwa, opis, typ pliku..." /></label>
@@ -633,7 +662,7 @@
         <header class="modal-header">
           <div>
             <p class="eyebrow">Baza wiedzy</p>
-            <h2>Dodaj dokument</h2>
+            <h2>Dodaj dokument z opisem</h2>
           </div>
           <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
         </header>
@@ -646,7 +675,7 @@
           </label>
         </div>
         <label>Opis
-          <textarea id="kbDetailInput" name="detail" rows="3" placeholder="Krótki opis, kiedy używać dokumentu"></textarea>
+          <textarea id="kbDetailInput" name="detail" rows="3" required placeholder="Krótki opis, kiedy używać dokumentu"></textarea>
         </label>
         <menu>
           <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
@@ -680,6 +709,91 @@
       </article>
     </dialog>
 
+    <dialog id="scheduleEditorDialog" class="modal">
+      <form id="scheduleEditorForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="scheduleEditorContext">Grafik pracy</p>
+            <h2 id="scheduleEditorTitle">Edytuj wpis</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <label>Typ wpisu
+          <select id="scheduleEditorMode">
+            <option value="work">Praca</option>
+            <option value="wolne">Wolne</option>
+            <option value="urlop">Urlop</option>
+            <option value="l4">L4</option>
+            <option value="szkolenie">Szkolenie</option>
+          </select>
+        </label>
+        <div class="task-form-grid" id="scheduleEditorWorkFields">
+          <label>Od
+            <input id="scheduleStartInput" type="time" step="900" />
+          </label>
+          <label>Do
+            <input id="scheduleEndInput" type="time" step="900" />
+          </label>
+        </div>
+        <menu>
+          <button class="secondary-button danger-button" id="scheduleClearButton" type="button">Wyczyść</button>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Zapisz wpis</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="feedItemDialog" class="modal">
+      <article class="modal-content">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="feedDialogType">Tablica</p>
+            <h2 id="feedDialogTitle">Szczegóły</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <p class="note" id="feedDialogBody"></p>
+        <div class="task-detail-grid">
+          <div><span>Źródło</span><strong id="feedDialogSource"></strong></div>
+          <div><span>Czas</span><strong id="feedDialogTime"></strong></div>
+          <div><span>Status</span><strong class="pill" id="feedDialogPill"></strong></div>
+          <div><span>Informacje</span><strong id="feedDialogMeta"></strong></div>
+        </div>
+        <div id="feedDialogExtra"></div>
+        <menu>
+          <button class="secondary-button" data-feed-dialog-source type="button">Przejdź do źródła</button>
+          <button class="primary-button" data-close-dialog type="button">Zamknij</button>
+        </menu>
+      </article>
+    </dialog>
+
+    <dialog id="pollFormDialog" class="modal">
+      <form id="pollForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Szybkie ankiety</p>
+            <h2>Dodaj ankietę</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <label>Pytanie
+          <input id="pollQuestionInput" type="text" required placeholder="Np. Który termin wybieramy?" />
+        </label>
+        <div class="task-form-grid">
+          <label>Opcja 1
+            <input id="pollOptionOneInput" type="text" required placeholder="Pierwsza odpowiedź" />
+          </label>
+          <label>Opcja 2
+            <input id="pollOptionTwoInput" type="text" required placeholder="Druga odpowiedź" />
+          </label>
+        </div>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Utwórz ankietę</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="notificationsDialog" class="modal">
       <form method="dialog">
         <header class="modal-header">
@@ -706,7 +820,7 @@
 
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
-    <script src="data.js?v=57"></script>
-    <script src="app.js?v=57"></script>
+    <script src="data.js?v=64"></script>
+    <script src="app.js?v=64"></script>
   </body>
 </html>
