@@ -261,8 +261,16 @@ def verify_password(password: str, stored_hash: str | None) -> bool:
         return False
 
 
+def ensure_runtime_dirs() -> None:
+    for path in (DB_DIR, UPLOAD_DIR, KNOWLEDGE_UPLOAD_DIR):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(f"Cannot create runtime directory {path}: {exc}") from exc
+
+
 def session_secret() -> bytes:
-    DB_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_runtime_dirs()
     if SECRET_PATH.exists():
         return SECRET_PATH.read_bytes()
     secret = secrets.token_bytes(48)
@@ -294,7 +302,7 @@ def read_session(token: str | None) -> str | None:
 
 
 def connect() -> sqlite3.Connection:
-    DB_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_runtime_dirs()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")

@@ -33,6 +33,27 @@ Po ustawieniu `PROKOM_DATA_DIR=/data` backend zapisuje:
 
 Bez Volume katalog `/data` bedzie nietrwaly po redeployu lub restarcie uslugi.
 
+## Problem: unable to open database file
+
+Jesli Railway pokazuje blad SQLite `unable to open database file`, sprawdz:
+
+1. Volume jest podlaczony do tej samej uslugi co backend.
+2. Mount path Volume to dokladnie:
+
+```text
+/data
+```
+
+3. W `Variables` istnieje:
+
+```env
+PROKOM_DATA_DIR=/data
+```
+
+4. Po zmianie Dockerfile wykonaj redeploy z czyszczeniem cache/build cache, jesli Railway dalej uruchamia stary obraz.
+
+Railway montuje Volume podczas startu kontenera. Ten Dockerfile uruchamia backend bez przelaczania na osobnego uzytkownika systemowego, zeby proces Pythona mial prawo zapisu do `/data`.
+
 ## Lokalny test podobny do Railway
 
 ```powershell

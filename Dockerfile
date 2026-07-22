@@ -8,11 +8,7 @@ WORKDIR /app
 
 COPY outputs/prokom-panel-prototype /app/outputs/prokom-panel-prototype
 
-RUN mkdir -p /data \
-    && useradd --create-home --shell /usr/sbin/nologin appuser \
-    && chown -R appuser:appuser /app /data
-
-USER appuser
+RUN mkdir -p /data /app/outputs/prokom-panel-prototype/uploads
 
 EXPOSE 4173
 
