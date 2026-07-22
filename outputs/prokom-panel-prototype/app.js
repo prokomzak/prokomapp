@@ -371,10 +371,16 @@ async function syncConversationMessagesFromBackend(conversationId, options = {})
         .forEach((message) => {
           if (notifiedChatMessageIds.has(message.id)) return;
           notifiedChatMessageIds.add(message.id);
-          pushNotification("Nowa wiadomość", `${getDisplayNameByLogin(message.authorLogin)}: ${message.body}`, {
-            view: "chat",
-            conversationId,
-          });
+          pushNotification(
+            "Nowa wiadomość",
+            `${getDisplayNameByLogin(message.authorLogin)}: ${message.body}`,
+            {
+              view: "chat",
+              conversationId,
+              messageId: message.id,
+            },
+            { id: `chat:${conversationId}:${message.id}` },
+          );
         });
     }
     return changed;
@@ -397,10 +403,40 @@ function isChatViewActive() {
 }
 
 function hasUnreadIncomingMessages(conversationId) {
+  return getUnreadIncomingMessages(conversationId).length > 0;
+}
+
+function getUnreadIncomingMessages(conversationId) {
   const login = getActiveLogin();
-  return (directMessages.get(conversationId) || []).some(
+  return (directMessages.get(conversationId) || []).filter(
     (message) => message.authorLogin !== login && !(message.readBy || []).includes(login),
   );
+}
+
+function unreadIncomingCount(conversationId) {
+  return getUnreadIncomingMessages(conversationId).length;
+}
+
+function clearChatNotificationsForReadMessages(conversationId, readMessagesOrIds = []) {
+  const readIds = new Set(
+    readMessagesOrIds
+      .map((item) => (typeof item === "string" ? item : item?.id))
+      .map(String)
+      .filter(Boolean),
+  );
+  let changed = false;
+  notifications = notifications.filter((item) => {
+    const notification = normalizeNotification(item);
+    const target = notification.target || {};
+    const isSameConversation = target.view === "chat" && target.conversationId === conversationId;
+    const matchesReadMessage = !target.messageId || !readIds.size || readIds.has(String(target.messageId));
+    if (!isSameConversation || !matchesReadMessage) return true;
+    notificationReadIds.add(String(notification.id));
+    changed = true;
+    return false;
+  });
+  if (changed) saveNotificationReadState();
+  return changed;
 }
 
 function applyLocalReadReceipt(conversationId, readMessageIds) {
@@ -430,14 +466,16 @@ function applyLocalReadReceipt(conversationId, readMessageIds) {
 
 async function markConversationRead(conversationId = currentConversation) {
   if (!isLoggedIn() || !conversationId || !isChatViewActive() || conversationId !== currentConversation) return false;
-  if (!hasUnreadIncomingMessages(conversationId)) return false;
+  const unreadMessages = getUnreadIncomingMessages(conversationId);
+  if (!unreadMessages.length) return clearChatNotificationsForReadMessages(conversationId);
 
   if (!backendAvailable) {
-    const readIds = (directMessages.get(conversationId) || [])
-      .filter((message) => message.authorLogin !== getActiveLogin())
-      .map((message) => message.id);
+    const readIds = unreadMessages.map((message) => message.id);
     const changed = applyLocalReadReceipt(conversationId, readIds);
-    if (changed) saveChatMessageState();
+    if (changed) {
+      saveChatMessageState();
+      clearChatNotificationsForReadMessages(conversationId, readIds);
+    }
     return changed;
   }
 
@@ -448,7 +486,10 @@ async function markConversationRead(conversationId = currentConversation) {
       method: "POST",
       body: JSON.stringify({ conversationId }),
     });
-    return applyLocalReadReceipt(conversationId, result.readMessageIds || []);
+    const readIds = result.readMessageIds || unreadMessages.map((message) => message.id);
+    const changed = applyLocalReadReceipt(conversationId, readIds);
+    if (changed) clearChatNotificationsForReadMessages(conversationId, readIds);
+    return changed;
   } catch {
     return false;
   } finally {
@@ -458,8 +499,13 @@ async function markConversationRead(conversationId = currentConversation) {
 
 function markCurrentConversationRead() {
   const conversationId = currentConversation;
-  window.setTimeout(() => {
-    markConversationRead(conversationId);
+  window.setTimeout(async () => {
+    const changed = await markConversationRead(conversationId);
+    if (changed) {
+      saveChatMessageState();
+      renderConversationUnreadBadges();
+      renderNotifications();
+    }
   }, 0);
 }
 
@@ -470,6 +516,8 @@ async function pollChatMessages() {
     const changed = await syncVisibleChatMessagesFromBackend({ notify: true });
     if (changed) {
       renderChat();
+      renderDashboardRecentChats();
+      renderNavNotificationBadges();
       if (isChatViewActive()) markCurrentConversationRead();
     }
   } finally {
@@ -573,6 +621,10 @@ function normalizePost(post) {
     readers: Array.isArray(post.readers) ? post.readers : [],
     reactions: post.reactions && typeof post.reactions === "object" ? post.reactions : {},
     comments: Array.isArray(post.comments) ? post.comments : [],
+    fileName: post.fileName || post.file_name || "",
+    fileMime: post.fileMime || post.file_mime || "",
+    fileSize: Number(post.fileSize || post.file_size || 0),
+    fileUrl: post.fileUrl || post.file_url || "",
     createdAt: post.createdAt || post.created_at || "",
   });
 }
@@ -586,6 +638,8 @@ function announcementSignature(items = posts) {
       unread: post.unread,
       comments: post.comments?.length || 0,
       reactions: postReactionTypes.map((reaction) => post.reactions?.[reaction.id]?.length || 0),
+      fileName: post.fileName,
+      fileSize: post.fileSize,
     })),
   );
 }
@@ -713,6 +767,7 @@ function taskSignature(value = tasks) {
 
 function renderTaskState() {
   renderKanban();
+  renderPosts(currentFeedFilter);
   if (activeTaskId && $("#taskDialog")?.open) {
     const ref = getTaskRef(activeTaskId);
     if (ref) openTaskDetails(activeTaskId);
@@ -761,6 +816,8 @@ function makeReportId() {
 }
 
 function normalizeReport(report) {
+  const fileName = report.fileName || report.file_name || "";
+  const fileMime = report.fileMime || report.file_mime || "";
   return {
     id: report.id || makeReportId(),
     category: report.category || "Sprawa organizacyjna",
@@ -771,6 +828,10 @@ function normalizeReport(report) {
     ownerLogin: normalizeLogin(report.ownerLogin || report.owner_login || ""),
     createdAt: report.createdAt || report.created_at || "teraz",
     updatedAt: report.updatedAt || report.updated_at || "",
+    fileName,
+    fileMime,
+    fileSize: Number(report.fileSize || report.file_size || 0),
+    fileUrl: report.fileUrl || report.file_url || "",
   };
 }
 
@@ -859,6 +920,7 @@ function applyRequestSnapshot(snapshot) {
 
 function renderRequestState() {
   renderRequests();
+  renderPosts(currentFeedFilter);
   applyRole();
 }
 
@@ -920,6 +982,8 @@ function reportSignature(value = reports) {
       report.owner,
       report.ownerLogin,
       report.updatedAt,
+      report.fileName,
+      report.fileSize,
     ]),
   );
 }
@@ -937,6 +1001,7 @@ function getReportById(reportId) {
 
 function renderReportState() {
   renderReports();
+  renderPosts(currentFeedFilter);
   applyRole();
 }
 
@@ -1026,6 +1091,7 @@ function calendarSignature(value = calendarEvents) {
 
 function renderCalendarState() {
   renderCalendar();
+  renderPosts(currentFeedFilter);
 }
 
 async function syncCalendarFromBackend(options = {}) {
@@ -1146,6 +1212,7 @@ function knowledgeSignature() {
 
 function renderKnowledgeState() {
   renderKnowledge();
+  renderPosts(currentFeedFilter);
 }
 
 async function syncKnowledgeFromBackend(options = {}) {
@@ -1393,6 +1460,8 @@ function updateAuthUi() {
   $("#currentUserName").textContent = currentUser.label;
   $("#currentUserRole").textContent = currentUser.isRoot
     ? "root / SQL"
+    : currentUser.login === "tadeusz"
+      ? "szef"
     : currentUser.role === "admin"
       ? "admin"
       : "pracownik";
@@ -1442,7 +1511,8 @@ function renderAccountOptions(preferredLogin = $("#accountSelect")?.value || "ta
   const accounts = activeAccounts();
   select.innerHTML = accounts
     .map((account) => {
-      const label = account.isRoot ? "root" : account.role === "admin" ? "administrator" : "pracownik";
+      const label =
+        account.login === "tadeusz" ? "szef" : account.isRoot ? "root" : account.role === "admin" ? "administrator" : "pracownik";
       return `<option value="${escapeHtml(account.login)}">${escapeHtml(account.login)} - ${label}</option>`;
     })
     .join("");
@@ -2130,6 +2200,216 @@ function reactionSummary(post) {
   return `${active} · ${commentsLabel(post.comments.length)}`;
 }
 
+function activitySortValue(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  if (text.toLowerCase() === "teraz") return Date.now();
+  const parsed = Date.parse(text.includes("T") ? text : text.replace(" ", "T"));
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function activityTimeLabel(value, fallback = "teraz") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  const parsed = Date.parse(text.includes("T") ? text : text.replace(" ", "T"));
+  if (Number.isNaN(parsed)) return text;
+  return new Intl.DateTimeFormat("pl-PL", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(parsed));
+}
+
+function isAdminLogin(login) {
+  const normalized = normalizeLogin(login);
+  return accounts.some((account) => account.login === normalized && account.role === "admin");
+}
+
+function renderFileAttachment(file, buttonLabel = "Otwórz załącznik") {
+  if (!file?.fileName) return "";
+  const fileMeta = [file.fileName, file.fileSize ? formatFileSize(file.fileSize) : ""].filter(Boolean).join(" · ");
+  return `
+    <div class="post-attachment report-attachment">
+      <span class="pill">${escapeHtml(fileIcon(file.fileMime, file.fileName))}</span>
+      <span>${escapeHtml(fileMeta)}</span>
+      ${
+        file.fileUrl
+          ? `<a class="secondary-button" href="${escapeHtml(file.fileUrl)}" target="_blank" rel="noopener">${escapeHtml(buttonLabel)}</a>`
+          : `<span class="muted">Brak pliku na serwerze</span>`
+      }
+    </div>
+  `;
+}
+
+function renderPostAttachment(post) {
+  return renderFileAttachment(post);
+}
+
+function buildActivityFeedItems() {
+  const fallbackBase = Date.now();
+  const fallbackSort = (index) => fallbackBase - index;
+  const taskItems = Object.entries(tasks).flatMap(([column, items]) =>
+    (items || []).map((task) => ({ ...task, column })),
+  );
+  const rawItems = [
+    ...posts.map((post, index) => {
+      ensurePostSocial(post);
+      const [label, color] = priorityLabel(post.priority);
+      return {
+        id: `post:${post.id}`,
+        type: "Ogłoszenie",
+        title: post.title,
+        body: post.body,
+        meta: `${post.author} · odczytali ${post.read}/${post.total}`,
+        time: activityTimeLabel(post.createdAt, post.unread ? "nieodczytane" : "ogłoszenie"),
+        sortValue: activitySortValue(post.createdAt, fallbackSort(index)),
+        pill: label,
+        color,
+        unread: post.unread,
+        attention: post.priority === "urgent",
+        fromAdmin: isAdminLogin(post.authorLogin),
+        actorLogin: post.authorLogin,
+        target: { view: "announcements", postId: post.id },
+        actionLabel: "Otwórz ogłoszenie",
+        extraHtml: `${renderPostAttachment(post)}<div class="post-social-summary"><span>${reactionSummary(post)}</span></div>`,
+      };
+    }),
+    ...reports.map((report, index) => ({
+      id: `report:${report.id}`,
+      type: "Zgłoszenie",
+      title: report.title,
+      body: report.detail,
+      meta: `${report.category} · ${report.owner} · ${report.status}`,
+      time: activityTimeLabel(report.updatedAt || report.createdAt, "zgłoszenie"),
+      sortValue: activitySortValue(report.updatedAt || report.createdAt, fallbackSort(100 + index)),
+      pill: report.status,
+      color: report.status === "Nowe" ? "red" : report.status === "Załatwione" ? "green" : "amber",
+      unread: report.status === "Nowe",
+      attention: report.status !== "Załatwione",
+      fromAdmin: isAdminLogin(report.ownerLogin),
+      actorLogin: report.ownerLogin,
+      target: { view: "reports", reportId: report.id },
+      actionLabel: "Przejdź do zgłoszeń",
+      extraHtml: renderFileAttachment(report),
+    })),
+    ...kbArticles.map((article, index) => ({
+      id: `knowledge:${article.id}`,
+      type: "Baza wiedzy",
+      title: article.title,
+      body: article.detail,
+      meta: [article.fileName, article.fileSize ? formatFileSize(article.fileSize) : "", getDisplayNameByLogin(article.createdBy)]
+        .filter(Boolean)
+        .join(" · "),
+      time: activityTimeLabel(article.createdAt, "dokument"),
+      sortValue: activitySortValue(article.createdAt, fallbackSort(200 + index)),
+      pill: article.type || "PLIK",
+      color: "green",
+      unread: false,
+      attention: false,
+      fromAdmin: isAdminLogin(article.createdBy),
+      actorLogin: article.createdBy,
+      target: { view: "knowledge", articleId: article.id },
+      actionLabel: "Przejdź do wiedzy",
+      extraHtml: renderFileAttachment(article, "Otwórz dokument"),
+    })),
+    ...calendarEvents.map((event, index) => ({
+      id: `calendar:${event.id}`,
+      type: "Kalendarz",
+      title: event.title,
+      body: `${event.date || "Data nieustalona"} · ${event.time || "Godzina nieustalona"}`,
+      meta: `${event.attendees} potwierdzeń · ${event.rsvp}`,
+      time: activityTimeLabel(event.createdAt, event.date || "wydarzenie"),
+      sortValue: activitySortValue(event.createdAt, fallbackSort(300 + index)),
+      pill: event.rsvp === "Będę" ? "Potwierdzone" : "RSVP",
+      color: event.rsvp === "Będę" ? "green" : "amber",
+      unread: event.rsvp !== "Będę",
+      attention: event.rsvp !== "Będę",
+      fromAdmin: isAdminLogin(event.createdBy),
+      actorLogin: event.createdBy,
+      target: { view: "calendar", eventId: event.id },
+      actionLabel: "Przejdź do kalendarza",
+    })),
+    ...requests.map((request, index) => ({
+      id: `request:${request.id}`,
+      type: request.kind === "correction" ? "Korekta czasu" : "Wniosek",
+      title: request.title,
+      body: request.detail,
+      meta: `${request.owner} · ${request.status}`,
+      time: activityTimeLabel(request.updatedAt || request.createdAt, "wniosek"),
+      sortValue: activitySortValue(request.updatedAt || request.createdAt, fallbackSort(400 + index)),
+      pill: request.status,
+      color: requestNeedsDecision(request) ? "amber" : request.status === "Zaakceptowane" ? "green" : "red",
+      unread: requestNeedsDecision(request),
+      attention: requestNeedsDecision(request),
+      fromAdmin: isAdminLogin(request.ownerLogin),
+      actorLogin: request.ownerLogin,
+      target: { view: "time", requestId: request.id },
+      actionLabel: "Przejdź do czasu pracy",
+    })),
+    ...taskItems.map((task, index) => ({
+      id: `task:${task.id}`,
+      type: "Zadanie",
+      title: task.title,
+      body: task.description,
+      meta: `${task.owner} · ${columnLabels[task.column] || "Zadania"} · termin: ${task.due}`,
+      time: activityTimeLabel(task.createdAt, "zadanie"),
+      sortValue: activitySortValue(task.createdAt, fallbackSort(500 + index)),
+      pill: columnLabels[task.column] || "Zadanie",
+      color: task.column === "done" ? "green" : task.priority === "urgent" ? "red" : "teal",
+      unread: task.column !== "done" && (task.ownerLogin === getActiveLogin() || task.owner === getActiveName()),
+      attention: task.priority === "urgent" && task.column !== "done",
+      fromAdmin: isAdminLogin(task.ownerLogin),
+      actorLogin: task.ownerLogin,
+      target: { view: "tasks", taskId: task.id },
+      actionLabel: "Otwórz zadanie",
+    })),
+    ...handoverNotes.map((note, index) => ({
+      id: `handover:${note.id}`,
+      type: "Zeszyt zmiany",
+      title: `Notatka od ${note.author}`,
+      body: note.text,
+      meta: `${note.accepted ? "Przyjęte" : "Nowe"} · przyjęło ${note.acceptedCount}`,
+      time: activityTimeLabel(note.createdAt || note.time, note.time || "notatka"),
+      sortValue: activitySortValue(note.createdAt, fallbackSort(600 + index)),
+      pill: note.accepted ? "Przyjęte" : "Nowe",
+      color: note.accepted ? "green" : "amber",
+      unread: !note.accepted,
+      attention: !note.accepted,
+      fromAdmin: isAdminLogin(note.authorLogin),
+      actorLogin: note.authorLogin,
+      target: { view: "knowledge", noteId: note.id },
+      actionLabel: "Przejdź do notatki",
+    })),
+  ];
+  return rawItems.sort((a, b) => b.sortValue - a.sortValue);
+}
+
+function feedItemMatchesFilter(item) {
+  if (currentFeedFilter === "boss") return item.fromAdmin;
+  if (currentFeedFilter === "unread") return item.unread || item.attention;
+  return true;
+}
+
+function renderActivityFeedItem(item) {
+  return `
+    <article class="feed-card ${item.unread || item.attention ? "attention" : ""}">
+      <div class="feed-card-top">
+        <span class="pill ${item.color || ""}">${escapeHtml(item.type)}</span>
+        <span class="muted">${escapeHtml(item.time)}</span>
+      </div>
+      <div class="widget-header">
+        <strong>${escapeHtml(item.title)}</strong>
+        <span class="pill ${item.color || ""}">${escapeHtml(item.pill)}</span>
+      </div>
+      <p class="note">${escapeHtml(item.body)}</p>
+      <div class="feed-meta">${escapeHtml(item.meta)}</div>
+      ${item.extraHtml || ""}
+      <button data-feed-item="${escapeHtml(item.id)}" type="button">${escapeHtml(item.actionLabel)}</button>
+    </article>
+  `;
+}
+
 function renderPostDialog(post = getPostById(activePostId)) {
   if (!post) return;
   const [label, color] = priorityLabel(post.priority);
@@ -2137,6 +2417,7 @@ function renderPostDialog(post = getPostById(activePostId)) {
   $("#postDialogPriority").className = `eyebrow ${color}`;
   $("#postDialogTitle").textContent = post.title;
   $("#postDialogBody").textContent = post.body;
+  $("#postDialogAttachment").innerHTML = renderPostAttachment(post);
   $("#postReadCount").textContent = `Odczytali ${post.read}/${post.total}`;
   $("#postReadNames").textContent = post.readers.length
     ? post.readers.map((reader) => `${reader.name} ${reader.time}`).join(" · ")
@@ -2192,37 +2473,10 @@ function renderUrgentStrip() {
 
 function renderPosts(filter = "all") {
   currentFeedFilter = filter;
-  const visiblePosts = posts.filter((post) => {
-    if (currentFeedFilter === "boss") {
-      const authorAccount = accounts.find(
-        (account) => account.login === post.authorLogin || account.name === post.author,
-      );
-      return authorAccount?.role === "admin";
-    }
-    if (currentFeedFilter === "unread") return post.unread;
-    return true;
-  });
-
-  const cards = visiblePosts
-    .map((post) => {
-      ensurePostSocial(post);
-      const [label, color] = priorityLabel(post.priority);
-      return `
-        <article class="feed-card">
-          <div class="widget-header">
-            <strong>${escapeHtml(post.title)}</strong>
-            <span class="pill ${color}">${label}</span>
-          </div>
-          <span class="muted">${escapeHtml(post.author)} · odczytali ${post.read}/${post.total}</span>
-          <p class="note">${escapeHtml(post.body)}</p>
-          <div class="post-social-summary"><span>${reactionSummary(post)}</span></div>
-          <button data-open-post="${post.id}" type="button">Otwórz ogłoszenie</button>
-        </article>
-      `;
-    })
-    .join("");
-
-  $("#feedList").innerHTML = cards;
+  const feedItems = buildActivityFeedItems().filter(feedItemMatchesFilter).slice(0, 16);
+  $("#feedList").innerHTML = feedItems.length
+    ? feedItems.map(renderActivityFeedItem).join("")
+    : `<div class="empty-state">Brak aktywności pasującej do wybranego filtra.</div>`;
   renderUrgentStrip();
 
   const announcementPosts = posts.filter((post) => {
@@ -2235,6 +2489,7 @@ function renderPosts(filter = "all") {
     .map((post) => {
       ensurePostSocial(post);
       const [label, color] = priorityLabel(post.priority);
+      const attachmentHtml = renderPostAttachment(post);
       return `
         <article class="announcement-card">
           <div class="widget-header">
@@ -2242,6 +2497,7 @@ function renderPosts(filter = "all") {
             <span class="pill ${color}">${label}</span>
           </div>
           <p class="note">${escapeHtml(post.body)}</p>
+          ${attachmentHtml}
           <div class="read-status">
             <span>Autor: ${escapeHtml(post.author)}</span>
             <span>Odczytali ${post.read}/${post.total}</span>
@@ -2270,8 +2526,13 @@ function renderKanban() {
             .filter(({ task }) => taskMatchesFilter(task))
             .map(({ task, index }) => {
               const [label, color] = priorityLabel(task.priority);
+              const isDone = column === "done";
+              const taskClasses = ["task-card", isDone ? "is-complete" : ""].filter(Boolean).join(" ");
+              const doneActions = isDone
+                ? `<button class="secondary-button" data-task-reopen="${task.id}" type="button">Cofnij</button>`
+                : "";
               return `
-                <article class="task-card" draggable="true" data-column="${column}" data-index="${index}" data-task-id="${
+                <article class="${taskClasses}" draggable="true" data-column="${column}" data-index="${index}" data-task-id="${
                   task.id
                 }">
                   <button class="task-title-button" data-task-detail="${task.id}" type="button">
@@ -2296,6 +2557,7 @@ function renderKanban() {
                   </label>
                   <div class="task-actions">
                     <button class="secondary-button" data-task-detail="${task.id}" type="button">Szczegóły</button>
+                    ${doneActions}
                     <button class="secondary-button danger-button" data-task-delete="${task.id}" type="button">Usuń</button>
                   </div>
                 </article>
@@ -2325,7 +2587,7 @@ function renderKanban() {
 
 function getTaskRef(taskId) {
   for (const [column, items] of Object.entries(tasks)) {
-    const index = items.findIndex((task) => task.id === taskId);
+    const index = items.findIndex((task) => String(task.id) === String(taskId));
     if (index >= 0) return { column, index, task: items[index] };
   }
   return null;
@@ -2457,6 +2719,8 @@ function openTaskDetails(taskId) {
   $("#taskDialogPriority").className = `pill ${priorityColor}`;
   $("#taskDialogSource").textContent = ref.task.source || columnLabels[ref.column];
   $("#taskDialogCreated").textContent = ref.task.createdAt || "Dzisiaj";
+  const activeReopenButton = $("[data-task-reopen-active]");
+  if (activeReopenButton) activeReopenButton.classList.toggle("hidden", ref.column !== "done");
   openDialog("#taskDialog");
 }
 
@@ -2648,29 +2912,66 @@ function renderRequests() {
   renderNotifications();
 }
 
+function reportIsClosed(report) {
+  return report.status === "Załatwione";
+}
+
+function reportStatusColor(report) {
+  if (report.status === "Nowe") return "red";
+  if (reportIsClosed(report)) return "green";
+  return "teal";
+}
+
 function renderReports() {
   normalizeReports();
   const visibleReports = reports
     .map((report) => ({ report }))
     .filter(({ report }) => {
       if (currentReportFilter === "mine") return report.ownerLogin === getActiveLogin() || report.owner === getActiveName();
-      if (currentReportFilter === "closed") return report.status === "Załatwione";
-      return report.status !== "Załatwione";
+      if (currentReportFilter === "closed") return reportIsClosed(report);
+      return true;
+    })
+    .sort(({ report: first }, { report: second }) => {
+      if (currentReportFilter === "closed") return 0;
+      return Number(reportIsClosed(first)) - Number(reportIsClosed(second));
     });
 
   $("#reportList").innerHTML = visibleReports
     .map(({ report }) => {
-      return `
-        <article class="report-card">
-          <div class="card-line">
-            <strong>${report.title}</strong>
-            <span class="pill ${report.status === "Nowe" ? "red" : "teal"}">${report.status}</span>
-          </div>
-          <span class="muted">${report.category} · ${report.owner}</span>
-          <p class="note">${report.detail}</p>
-          <div class="card-actions">
+      const fileMeta = [report.fileName, report.fileSize ? formatFileSize(report.fileSize) : ""].filter(Boolean).join(" · ");
+      const isClosed = reportIsClosed(report);
+      const actions = isClosed
+        ? `
+            <button class="secondary-button" data-report-reopen="${report.id}" type="button">Cofnij</button>
+            <button class="secondary-button danger-button" data-report-delete="${report.id}" type="button">Usuń</button>
+          `
+        : `
             <button class="secondary-button admin-widget" data-report-task="${report.id}" type="button">Utwórz zadanie</button>
             <button class="secondary-button" data-report-close="${report.id}" type="button">Oznacz załatwione</button>
+          `;
+      return `
+        <article class="report-card ${isClosed ? "is-complete" : ""}">
+          <div class="card-line">
+            <strong>${escapeHtml(report.title)}</strong>
+            <span class="pill ${reportStatusColor(report)}">${escapeHtml(report.status)}</span>
+          </div>
+          <span class="muted">${escapeHtml(report.category)} · ${escapeHtml(report.owner)}</span>
+          <p class="note">${escapeHtml(report.detail)}</p>
+          ${
+            report.fileName
+              ? `<div class="report-attachment">
+                  <span class="pill">${escapeHtml(fileIcon(report.fileMime, report.fileName))}</span>
+                  <span>${escapeHtml(fileMeta)}</span>
+                  ${
+                    report.fileUrl
+                      ? `<a class="secondary-button" href="${escapeHtml(report.fileUrl)}" target="_blank" rel="noopener">Otwórz załącznik</a>`
+                      : `<span class="muted">Brak pliku na serwerze</span>`
+                  }
+                </div>`
+              : ""
+          }
+          <div class="card-actions">
+            ${actions}
           </div>
         </article>
       `;
@@ -2843,6 +3144,39 @@ function markNotificationRead(notification) {
   saveNotificationReadState();
 }
 
+function renderNavNotificationBadges() {
+  if (!isLoggedIn()) {
+    $$(".nav-item .nav-alert").forEach((badge) => badge.remove());
+    return;
+  }
+  const counts = new Map();
+  renderedNotifications
+    .filter((notification) => notification.unread || notification.persistent)
+    .forEach((notification) => {
+      const view = notification.target?.view;
+      if (!view) return;
+      counts.set(view, (counts.get(view) || 0) + 1);
+    });
+
+  const unreadChatMessages = getChatConversations().reduce(
+    (sum, conversation) => sum + unreadIncomingCount(conversation.id),
+    0,
+  );
+  if (unreadChatMessages) {
+    counts.set("chat", Math.max(counts.get("chat") || 0, unreadChatMessages));
+  }
+
+  $$(".nav-item").forEach((button) => {
+    button.querySelector(".nav-alert")?.remove();
+    const count = counts.get(button.dataset.view) || 0;
+    if (!count) return;
+    const badge = document.createElement("span");
+    badge.className = "nav-alert";
+    badge.textContent = count > 9 ? "9+" : String(count);
+    button.append(badge);
+  });
+}
+
 function renderNotifications() {
   renderedNotifications = getVisibleNotifications();
   const unread = renderedNotifications.filter((notification) => notification.unread).length;
@@ -2865,6 +3199,8 @@ function renderNotifications() {
     )
     .join("")
     : `<div class="empty-state">Brak powiadomień.</div>`;
+  renderNavNotificationBadges();
+  renderDashboardRecentChats();
 }
 
 function openDialog(selector, options = {}) {
@@ -2932,6 +3268,46 @@ async function openNotificationSource(index) {
   }
   if (target.taskId) openTaskDetails(target.taskId);
   renderNotifications();
+}
+
+async function openFeedItemSource(itemId) {
+  const item = buildActivityFeedItems().find((entry) => entry.id === itemId);
+  if (!item) return;
+  const target = item.target || {};
+  if (target.view === "announcements" && target.postId) {
+    activateView("announcements");
+    await openPost(target.postId);
+    return;
+  }
+  if (target.view === "reports") {
+    const report = target.reportId ? getReportById(target.reportId) : null;
+    currentReportFilter = report?.status === "Załatwione" ? "closed" : "open";
+    activateView("reports");
+    renderReportState();
+    return;
+  }
+  if (target.view === "tasks") {
+    activateView("tasks");
+    if (target.taskId) openTaskDetails(target.taskId);
+    return;
+  }
+  if (target.view === "time") {
+    activateView("time");
+    renderRequestState();
+    return;
+  }
+  if (target.view === "calendar") {
+    activateView("calendar");
+    renderCalendarState();
+    return;
+  }
+  if (target.view === "knowledge") {
+    kbSearchQuery = "";
+    activateView("knowledge");
+    renderKnowledgeState();
+    return;
+  }
+  activateView(target.view || "dashboard");
 }
 
 function showToast(title, body = "") {
@@ -3110,6 +3486,81 @@ function getChatConversations() {
   return [...groups, ...direct];
 }
 
+function getVisibleConversations() {
+  return getChatConversations();
+}
+
+function getConversationLastMessage(conversation) {
+  return conversation.messages?.length ? conversation.messages[conversation.messages.length - 1] : null;
+}
+
+function getRecentChatConversations(limit = 4) {
+  return getChatConversations()
+    .map((conversation, index) => {
+      const lastMessage = getConversationLastMessage(conversation);
+      return {
+        ...conversation,
+        lastMessage,
+        unreadCount: unreadIncomingCount(conversation.id),
+        sortKey: lastMessage?.createdAt || lastMessage?.time || `-${index}`,
+      };
+    })
+    .sort((a, b) => {
+      if (b.unreadCount !== a.unreadCount) return b.unreadCount - a.unreadCount;
+      return String(b.sortKey).localeCompare(String(a.sortKey));
+    })
+    .slice(0, limit);
+}
+
+function renderDashboardRecentChats() {
+  const list = $("#dashboardRecentChats");
+  const badge = $("#dashboardChatBadge");
+  if (!list || !badge || !isLoggedIn()) return;
+  const conversations = getRecentChatConversations();
+  const unreadTotal = getChatConversations().reduce((sum, conversation) => sum + unreadIncomingCount(conversation.id), 0);
+  badge.textContent = unreadTotal ? `${unreadTotal} nowych` : "0 nowych";
+  badge.className = `pill ${unreadTotal ? "red" : "green"}`;
+  list.innerHTML = conversations.length
+    ? conversations
+        .map((conversation) => {
+          const lastMessage = conversation.lastMessage;
+          const preview = lastMessage
+            ? `${getMessageAuthor(lastMessage)}: ${lastMessage.body || (lastMessage.attachments?.length ? "Załącznik" : "Wiadomość")}`
+            : "Brak wiadomości";
+          return `
+            <button class="recent-chat-button ${conversation.unreadCount ? "unread" : ""}" data-dashboard-conversation="${escapeHtml(
+              conversation.id,
+            )}" type="button">
+              <strong>${escapeHtml(conversation.title)}</strong>
+              ${conversation.unreadCount ? `<span class="pill red">${conversation.unreadCount}</span>` : `<span class="pill green">OK</span>`}
+              <small>${escapeHtml(preview)}</small>
+            </button>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Brak rozmów do pokazania.</div>`;
+}
+
+function conversationUnreadLabel(count) {
+  return count > 9 ? "9+" : String(count);
+}
+
+function renderConversationUnreadBadges() {
+  $$("#conversationList .conversation-button").forEach((button) => {
+    const count = unreadIncomingCount(button.dataset.conversation);
+    const badge = button.querySelector("[data-conversation-alert]");
+    button.classList.toggle("unread", count > 0);
+    if (!badge) return;
+    badge.textContent = count ? conversationUnreadLabel(count) : "";
+    badge.classList.toggle("hidden", count === 0);
+    if (count) {
+      badge.setAttribute("aria-label", `${count} nieodczytane wiadomości`);
+    } else {
+      badge.removeAttribute("aria-label");
+    }
+  });
+}
+
 function formatFileSize(bytes) {
   if (!bytes) return "0 KB";
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -3265,12 +3716,22 @@ function renderChat() {
 
   $("#conversationList").innerHTML = availableConversations
     .map(
-      (conversation) => `
-        <button class="conversation-button ${conversation.id === currentConversation ? "active" : ""}" data-conversation="${conversation.id}" type="button">
-          <strong>${conversation.title}</strong>
-          <span class="muted">${conversation.subtitle}</span>
+      (conversation) => {
+        const unreadCount = unreadIncomingCount(conversation.id);
+        return `
+        <button class="conversation-button ${conversation.id === currentConversation ? "active" : ""} ${
+          unreadCount ? "unread" : ""
+        }" data-conversation="${conversation.id}" type="button">
+          <span class="conversation-button-top">
+            <strong>${escapeHtml(conversation.title)}</strong>
+            <span class="conversation-alert ${unreadCount ? "" : "hidden"}" data-conversation-alert ${
+              unreadCount ? `aria-label="${unreadCount} nieodczytane wiadomości"` : ""
+            }>${unreadCount ? conversationUnreadLabel(unreadCount) : ""}</span>
+          </span>
+          <span class="muted">${escapeHtml(conversation.subtitle)}</span>
         </button>
-      `,
+      `;
+      },
     )
     .join("");
 
@@ -3291,6 +3752,8 @@ function renderChat() {
         })
         .join("")
     : `<div class="empty-state">Brak wiadomości w tej rozmowie.</div>`;
+  renderDashboardRecentChats();
+  renderNavNotificationBadges();
   markCurrentConversationRead();
 }
 
@@ -3386,6 +3849,24 @@ function activateView(viewId) {
       if (changed) renderAnnouncementState();
     });
   }
+  if (viewId === "dashboard" && backendAvailable && isLoggedIn()) {
+    Promise.all([
+      syncTasksFromBackend({ silent: true }),
+      syncReportsFromBackend({ silent: true }),
+      syncRequestsFromBackend({ silent: true }),
+      syncCalendarFromBackend({ silent: true }),
+      syncKnowledgeFromBackend({ silent: true }),
+    ]).then((changes) => {
+      if (!changes.some(Boolean)) return;
+      renderKanban();
+      renderRequests();
+      renderReports();
+      renderCalendar();
+      renderKnowledge();
+      renderPosts(currentFeedFilter);
+      applyRole();
+    });
+  }
   if (["dashboard", "time"].includes(viewId) && backendAvailable && isLoggedIn()) {
     refreshPresence();
   }
@@ -3436,6 +3917,8 @@ function restoreDashboardLayout() {
     const widget = widgetsByKey.get(key);
     if (widget) grid.append(widget);
   });
+  const featureFeed = grid.querySelector(".feature-feed-widget");
+  if (featureFeed) grid.prepend(featureFeed);
 }
 
 function bindDashboardDrag() {
@@ -3519,15 +4002,19 @@ async function createPost(event) {
   const body = $("#postBody").value.trim();
   const priority = $("#postPriority").value;
   const audience = $("#postAudience").value;
+  const file = $("#postAttachment")?.files?.[0];
   const recipientLogins = $$("[data-announcement-recipient]:checked").map((input) => normalizeLogin(input.value));
   if (!title || !body) return;
 
   if (backendAvailable) {
     try {
-      const result = await apiRequest("/announcements", {
-        method: "POST",
-        body: JSON.stringify({ title, body, priority, audience, recipientLogins }),
-      });
+      const formData = new FormData(event.target);
+      formData.set("title", title);
+      formData.set("body", body);
+      formData.set("priority", priority);
+      formData.set("audience", audience);
+      formData.set("recipientLogins", JSON.stringify(recipientLogins));
+      const result = await apiFormRequest("/announcements", formData);
       applyAnnouncementMutationResult(result, result.post?.id);
       pushNotification("Nowe ogłoszenie", title, { view: "announcements", postId: result.post?.id });
       showToast("Opublikowano ogłoszenie", "Jest zapisane w bazie i widoczne dla pozostałych użytkowników.");
@@ -3559,6 +4046,10 @@ async function createPost(event) {
     readers: [{ name: getActiveName(), time: now }],
     reactions: { like: [], done: [getActiveName()], question: [] },
     comments: [],
+    fileName: file?.name || "",
+    fileMime: file?.type || "",
+    fileSize: file?.size || 0,
+    fileUrl: file ? URL.createObjectURL(file) : "",
   };
   posts.unshift(post);
   renderPosts();
@@ -3706,13 +4197,15 @@ async function createReport(event) {
   event.preventDefault();
   const category = $("#reportCategory").value;
   const detail = $("#reportText").value.trim();
+  const file = $("#reportFileInput").files?.[0];
   if (!detail) return;
   if (backendAvailable) {
     try {
-      const result = await apiRequest("/reports", {
-        method: "POST",
-        body: JSON.stringify({ category, title: category, detail }),
-      });
+      const formData = new FormData(event.target);
+      formData.set("category", category);
+      formData.set("title", category);
+      formData.set("detail", detail);
+      const result = await apiFormRequest("/reports", formData);
       applyReportSnapshot(result);
       renderReportState();
       event.target.reset();
@@ -3732,6 +4225,10 @@ async function createReport(event) {
     status: "Nowe",
     owner: getActiveName(),
     ownerLogin: getActiveLogin(),
+    fileName: file?.name || "",
+    fileMime: file?.type || "",
+    fileSize: file?.size || 0,
+    fileUrl: file ? URL.createObjectURL(file) : "",
   });
   renderReports();
   applyRole();
@@ -3758,6 +4255,25 @@ async function updateReportStatus(reportId, status) {
   }
   report.status = status;
   report.updatedAt = "teraz";
+  renderReportState();
+  return report;
+}
+
+async function deleteReport(reportId) {
+  const report = getReportById(reportId);
+  if (!report) return null;
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/reports/${encodeURIComponent(report.id)}`, { method: "DELETE" });
+      applyReportSnapshot(result);
+      renderReportState();
+      return report;
+    } catch (error) {
+      showToast("Nie usunięto zgłoszenia", error.message || "Backend odrzucił usunięcie.");
+      return null;
+    }
+  }
+  reports = reports.filter((item) => String(item.id) !== String(report.id));
   renderReportState();
   return report;
 }
@@ -3805,10 +4321,6 @@ async function createChatMessage(event) {
   clearStagedChatAttachments({ release: false });
   input.value = "";
   renderChat();
-  pushNotification("Nowa wiadomość", `Wysłano do: ${$("#chatTitle").textContent}`, {
-    view: "chat",
-    conversationId: currentConversation,
-  });
   showToast("Wiadomość wysłana", "Status zmieni się po otwarciu rozmowy przez odbiorcę.");
 }
 
@@ -3936,17 +4448,35 @@ function exportTimeCsv() {
   showToast("Eksport gotowy", "Pobrano raport CSV ze statystykami czasu pracy.");
 }
 
-async function addCalendarEvent() {
-  const title = window.prompt("Tytuł wydarzenia")?.trim();
-  if (!title) return;
+function formatDateInputValue(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function calendarPayloadFromForm() {
+  const title = $("#calendarTitleInput").value.trim();
+  const dateValue = $("#calendarDateInput").value || formatDateInputValue();
+  const selectedDate = new Date(`${dateValue}T00:00:00`);
+  const safeDate = Number.isNaN(selectedDate.getTime()) ? new Date() : selectedDate;
+  const day = Math.min(31, Math.max(1, safeDate.getDate()));
+  const date = new Intl.DateTimeFormat("pl-PL", { day: "2-digit", month: "2-digit" }).format(safeDate);
+  const time = $("#calendarTimeInput").value || "09:00";
+  return { day, title, date, time };
+}
+
+function openCalendarForm() {
   const today = new Date();
-  const defaultDay = String(today.getDate()).padStart(2, "0");
-  const dayText = window.prompt("Dzień miesiąca", defaultDay)?.trim() || defaultDay;
-  const day = Math.min(31, Math.max(1, Number.parseInt(dayText, 10) || today.getDate()));
-  const defaultDate = `${String(day).padStart(2, "0")}.${String(today.getMonth() + 1).padStart(2, "0")}`;
-  const date = window.prompt("Data w formacie DD.MM", defaultDate)?.trim() || defaultDate;
-  const time = window.prompt("Godzina w formacie HH:MM", "09:00")?.trim() || "09:00";
-  const eventPayload = { day, title, date, time };
+  $("#calendarForm").reset();
+  $("#calendarDateInput").value = formatDateInputValue(today);
+  $("#calendarTimeInput").value = "09:00";
+  openDialog("#calendarFormDialog");
+  $("#calendarTitleInput").focus();
+}
+
+async function createCalendarEvent(event) {
+  event.preventDefault();
+  const eventPayload = calendarPayloadFromForm();
+  const { title } = eventPayload;
+  if (!title) return;
   if (backendAvailable) {
     try {
       const result = await apiRequest("/calendar", {
@@ -3955,11 +4485,12 @@ async function addCalendarEvent() {
       });
       applyCalendarSnapshot(result);
       renderCalendarState();
+      $("#calendarFormDialog").close();
       pushNotification("Nowe wydarzenie", `${title} dodane do kalendarza.`, { view: "calendar" });
-      showToast("Dodano wydarzenie w bazie", "Pojawi?o si? we wsp?lnym kalendarzu.");
+      showToast("Dodano wydarzenie w bazie", "Pojawiło się we wspólnym kalendarzu.");
       return;
     } catch (error) {
-      showToast("Nie dodano wydarzenia", error.message || "Backend odrzuci? zapis.");
+      showToast("Nie dodano wydarzenia", error.message || "Backend odrzucił zapis.");
       return;
     }
   }
@@ -3969,9 +4500,16 @@ async function addCalendarEvent() {
     rsvp: "Niepotwierdzone",
     attendees: 1,
   });
+  $("#calendarFormDialog").close();
   renderCalendar();
   pushNotification("Nowe wydarzenie", `${title} dodane do kalendarza.`, { view: "calendar" });
-  showToast("Dodano wydarzenie", "Pojawi?o si? w kalendarzu i na li?cie nadchodz?cych.");
+  showToast("Dodano wydarzenie", "Pojawiło się w kalendarzu i na liście nadchodzących.");
+}
+
+function openKnowledgeForm() {
+  $("#kbForm").reset();
+  openDialog("#knowledgeFormDialog");
+  $("#kbTitleInput").focus();
 }
 
 async function createKnowledgeArticle(event) {
@@ -3998,6 +4536,7 @@ async function createKnowledgeArticle(event) {
       const result = await apiFormRequest("/knowledge/articles", formData);
       applyKnowledgeSnapshot(result);
       form.reset();
+      $("#knowledgeFormDialog").close();
       renderKnowledgeState();
       pushNotification("Baza wiedzy", `Dodano dokument: ${articlePayload.title}`, { view: "knowledge" });
       showToast("Dokument dodany w bazie", "Nowa pozycja jest widoczna dla wszystkich użytkowników.");
@@ -4014,6 +4553,7 @@ async function createKnowledgeArticle(event) {
     createdBy: getActiveLogin(),
   });
   form.reset();
+  $("#knowledgeFormDialog").close();
   renderKnowledge();
   pushNotification("Baza wiedzy", `Dodano dokument: ${articlePayload.title}`, { view: "knowledge" });
   showToast("Dokument dodany", "Nowa pozycja jest widoczna w bazie wiedzy.");
@@ -4072,6 +4612,9 @@ async function boot() {
   $("#breakButton").addEventListener("click", toggleBreak);
   $("#addTaskButton").addEventListener("click", openTaskForm);
   $("#taskForm").addEventListener("submit", createTask);
+  $("#addEventButton").addEventListener("click", openCalendarForm);
+  $("#calendarForm").addEventListener("submit", createCalendarEvent);
+  $("#addKnowledgeButton").addEventListener("click", openKnowledgeForm);
   $("#announcementForm").addEventListener("submit", createPost);
   $("#postCommentForm").addEventListener("submit", createPostComment);
   $("#leaveForm").addEventListener("submit", createLeaveRequest);
@@ -4123,7 +4666,6 @@ async function boot() {
     showToast("Powiadomienia odczytane");
   });
   $("#exportTimeButton").addEventListener("click", exportTimeCsv);
-  $("#addEventButton").addEventListener("click", addCalendarEvent);
   $("#correctionButton").addEventListener("click", async () => {
     const title = `Korekta czasu: ${getActiveName()}`;
     const detail = "Dzisiaj · zapomniałem wybić się o 17:00";
@@ -4202,6 +4744,12 @@ async function boot() {
       return;
     }
 
+    const feedButton = event.target.closest("[data-feed-item]");
+    if (feedButton) {
+      await openFeedItemSource(feedButton.dataset.feedItem);
+      return;
+    }
+
     const accountRemoveButton = event.target.closest("[data-account-remove]");
     if (accountRemoveButton) {
       removeAccount(accountRemoveButton.dataset.accountRemove);
@@ -4214,9 +4762,21 @@ async function boot() {
       return;
     }
 
+    const taskReopenButton = event.target.closest("[data-task-reopen]");
+    if (taskReopenButton) {
+      await moveTask(taskReopenButton.dataset.taskReopen, "review");
+      return;
+    }
+
     const taskDeleteButton = event.target.closest("[data-task-delete]");
     if (taskDeleteButton) {
       await deleteTask(taskDeleteButton.dataset.taskDelete);
+      return;
+    }
+
+    const activeTaskReopenButton = event.target.closest("[data-task-reopen-active]");
+    if (activeTaskReopenButton && activeTaskId) {
+      await moveTask(activeTaskId, "review");
       return;
     }
 
@@ -4267,6 +4827,16 @@ async function boot() {
     if (conversationButton) {
       currentConversation = conversationButton.dataset.conversation;
       clearStagedChatAttachments();
+      await syncConversationMessagesFromBackend(currentConversation);
+      renderChat();
+      return;
+    }
+
+    const dashboardConversationButton = event.target.closest("[data-dashboard-conversation]");
+    if (dashboardConversationButton) {
+      currentConversation = dashboardConversationButton.dataset.dashboardConversation;
+      clearStagedChatAttachments();
+      activateView("chat");
       await syncConversationMessagesFromBackend(currentConversation);
       renderChat();
       return;
@@ -4371,6 +4941,20 @@ async function boot() {
     if (reportCloseButton) {
       const report = await updateReportStatus(reportCloseButton.dataset.reportClose, "Załatwione");
       if (report) showToast("Zgłoszenie zamknięte");
+      return;
+    }
+
+    const reportReopenButton = event.target.closest("[data-report-reopen]");
+    if (reportReopenButton) {
+      const report = await updateReportStatus(reportReopenButton.dataset.reportReopen, "W realizacji");
+      if (report) showToast("Zgłoszenie przywrócone", report.title);
+      return;
+    }
+
+    const reportDeleteButton = event.target.closest("[data-report-delete]");
+    if (reportDeleteButton) {
+      const report = await deleteReport(reportDeleteButton.dataset.reportDelete);
+      if (report) showToast("Zgłoszenie usunięte", report.title);
       return;
     }
 

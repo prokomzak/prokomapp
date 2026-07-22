@@ -167,9 +167,26 @@ button {
 
 .nav-item {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   text-align: left;
   background: transparent;
   color: var(--muted);
+}
+
+.nav-alert {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--red);
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1;
 }
 
 .nav-item.active {
@@ -400,6 +417,18 @@ textarea {
   grid-column: span 2;
 }
 
+.feature-feed-widget {
+  grid-column: 1 / -1;
+}
+
+.feature-feed-widget .feed-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.feature-feed-widget .feed-card {
+  min-height: 150px;
+}
+
 .widget-header,
 .panel-header,
 .modal-header,
@@ -409,6 +438,14 @@ textarea {
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 14px;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .pill {
@@ -608,6 +645,32 @@ textarea {
   gap: 6px;
 }
 
+.feed-card.attention {
+  border-color: color-mix(in srgb, var(--amber), var(--line) 45%);
+  background: color-mix(in srgb, var(--surface), var(--amber) 5%);
+}
+
+.feed-card-top,
+.feed-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.feed-meta {
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.feed-card .widget-header,
+.feed-card .note {
+  margin-bottom: 0;
+}
+
 .feed-card > button,
 .announcement-card > button {
   justify-self: start;
@@ -616,6 +679,44 @@ textarea {
   background: transparent;
   color: var(--teal);
   font-weight: 750;
+}
+
+.recent-chat-list {
+  display: grid;
+  gap: 8px;
+}
+
+.recent-chat-button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-chat-button:hover {
+  border-color: color-mix(in srgb, var(--teal), var(--line) 50%);
+}
+
+.recent-chat-button.unread {
+  background: color-mix(in srgb, var(--teal), var(--surface) 92%);
+  border-color: color-mix(in srgb, var(--teal), var(--line) 35%);
+}
+
+.recent-chat-button small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timeline {
@@ -845,6 +946,27 @@ legend {
 
 .task-card.dragging {
   opacity: 0.5;
+}
+
+.task-card.is-complete,
+.report-card.is-complete {
+  border-color: color-mix(in srgb, var(--line), var(--muted) 32%);
+  background: color-mix(in srgb, var(--surface), var(--muted) 8%);
+  box-shadow: none;
+}
+
+.task-card.is-complete > :not(.task-actions),
+.report-card.is-complete > :not(.card-actions) {
+  opacity: 0.62;
+  filter: grayscale(0.55);
+}
+
+.task-card.is-complete .task-title-button,
+.report-card.is-complete .card-line strong {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 .task-meta {
@@ -1263,6 +1385,41 @@ legend {
   text-align: left;
 }
 
+.conversation-button-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.conversation-button-top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-alert {
+  display: inline-grid;
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--red);
+  color: white;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red), transparent 82%);
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.conversation-button.unread {
+  border-color: color-mix(in srgb, var(--red), var(--line) 45%);
+  background: color-mix(in srgb, var(--surface), var(--red) 4%);
+}
+
 .conversation-button.active {
   background: var(--surface-soft);
   border-color: color-mix(in srgb, var(--teal), var(--line) 40%);
@@ -1405,6 +1562,18 @@ legend {
   object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--line);
+}
+
+.report-attachment {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
 }
 
 .knowledge-layout {
@@ -2139,6 +2308,10 @@ legend {
   .kanban-column {
     flex-basis: min(88vw, 315px);
     padding: 10px;
+  }
+
+  .feature-feed-widget .feed-list {
+    grid-template-columns: 1fr;
   }
 
   .calendar-grid {

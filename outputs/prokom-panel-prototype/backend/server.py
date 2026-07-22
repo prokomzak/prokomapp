@@ -37,9 +37,12 @@ elif CONFIGURED_DATA_DIR:
 else:
     UPLOAD_DIR = APP_DIR / "uploads"
 KNOWLEDGE_UPLOAD_DIR = UPLOAD_DIR / "knowledge"
+REPORT_UPLOAD_DIR = UPLOAD_DIR / "reports"
+ANNOUNCEMENT_UPLOAD_DIR = UPLOAD_DIR / "announcements"
 SESSION_COOKIE = "prokom_session"
 SESSION_TTL = 60 * 60 * 12
 APP_ACCOUNT_ROSTER_MIGRATION_KEY = "app_account_roster_2026_07_21"
+TADEUSZ_TITLE_MIGRATION_KEY = "tadeusz_title_szef_2026_07_22"
 KNOWLEDGE_CONTENT_MIGRATION_KEY = "knowledge_content_real_docs_2026_07_21"
 LEGACY_CONTENT_MIGRATION_KEY = "legacy_content_cleanup_2026_07_21"
 MAX_KNOWLEDGE_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -70,7 +73,7 @@ SEED_USERS = [
         "display_name": "Tadeusz",
         "password": None,
         "app_role": "admin",
-        "team_role": "Administrator",
+        "team_role": "Szef",
         "initials": "TA",
         "allow_raw_sql": 0,
         "can_create_users": 1,
@@ -262,7 +265,7 @@ def verify_password(password: str, stored_hash: str | None) -> bool:
 
 
 def ensure_runtime_dirs() -> None:
-    for path in (DB_DIR, UPLOAD_DIR, KNOWLEDGE_UPLOAD_DIR):
+    for path in (DB_DIR, UPLOAD_DIR, KNOWLEDGE_UPLOAD_DIR, REPORT_UPLOAD_DIR, ANNOUNCEMENT_UPLOAD_DIR):
         try:
             path.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -417,6 +420,26 @@ def migrate_app_account_roster(conn: sqlite3.Connection) -> None:
     )
 
 
+def migrate_tadeusz_title(conn: sqlite3.Connection) -> None:
+    already_done = conn.execute(
+        "SELECT value FROM database_meta WHERE key = ?",
+        (TADEUSZ_TITLE_MIGRATION_KEY,),
+    ).fetchone()
+    if already_done:
+        return
+
+    conn.execute("UPDATE users SET team_role = 'Szef', updated_at = ? WHERE login = 'tadeusz'", (now_text(),))
+    conn.execute(
+        "INSERT INTO audit_log(actor_login, action, details) VALUES(NULL, 'UPDATE_TADEUSZ_TITLE', ?)",
+        ("Changed Tadeusz team role label to Szef.",),
+    )
+    conn.execute(
+        "INSERT INTO database_meta(key, value) VALUES(?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (TADEUSZ_TITLE_MIGRATION_KEY, now_text()),
+    )
+
+
 def ensure_knowledge_schema(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(knowledge_articles)").fetchall()}
     for column, definition in (
@@ -427,6 +450,30 @@ def ensure_knowledge_schema(conn: sqlite3.Connection) -> None:
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE knowledge_articles ADD COLUMN {definition}")
+
+
+def ensure_report_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(internal_reports)").fetchall()}
+    for column, definition in (
+        ("file_name", "file_name TEXT"),
+        ("file_mime", "file_mime TEXT"),
+        ("file_size", "file_size INTEGER NOT NULL DEFAULT 0"),
+        ("file_storage_name", "file_storage_name TEXT"),
+    ):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE internal_reports ADD COLUMN {definition}")
+
+
+def ensure_announcement_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(announcements)").fetchall()}
+    for column, definition in (
+        ("file_name", "file_name TEXT"),
+        ("file_mime", "file_mime TEXT"),
+        ("file_size", "file_size INTEGER NOT NULL DEFAULT 0"),
+        ("file_storage_name", "file_storage_name TEXT"),
+    ):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE announcements ADD COLUMN {definition}")
 
 
 def migrate_knowledge_content(conn: sqlite3.Connection) -> None:
@@ -641,6 +688,10 @@ def initialize_database() -> None:
               priority TEXT NOT NULL CHECK (priority IN ('normal', 'important', 'urgent')) DEFAULT 'normal',
               author_login TEXT,
               time_label TEXT NOT NULL,
+              file_name TEXT,
+              file_mime TEXT,
+              file_size INTEGER NOT NULL DEFAULT 0,
+              file_storage_name TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY (author_login) REFERENCES users(login) ON DELETE SET NULL
             );
@@ -710,6 +761,10 @@ def initialize_database() -> None:
               status TEXT NOT NULL DEFAULT 'Nowe',
               owner_login TEXT,
               owner_name TEXT NOT NULL,
+              file_name TEXT,
+              file_mime TEXT,
+              file_size INTEGER NOT NULL DEFAULT 0,
+              file_storage_name TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY (owner_login) REFERENCES users(login) ON DELETE SET NULL
@@ -816,7 +871,7 @@ def initialize_database() -> None:
             "database_role": "LAN server local file",
             "planned_lan_ip": "192.168.1.101",
             "backend": "python-standard-library",
-            "schema_version": "12",
+            "schema_version": "14",
         }
         for key, value in meta.items():
             conn.execute(
@@ -825,6 +880,8 @@ def initialize_database() -> None:
                 (key, value),
             )
         ensure_knowledge_schema(conn)
+        ensure_report_schema(conn)
+        ensure_announcement_schema(conn)
         for user in SEED_USERS:
             existing = conn.execute("SELECT login FROM users WHERE login = ?", (user["login"],)).fetchone()
             if existing:
@@ -860,6 +917,7 @@ def initialize_database() -> None:
                     (user["login"], permission),
                 )
         migrate_app_account_roster(conn)
+        migrate_tadeusz_title(conn)
         migrate_knowledge_content(conn)
         migrate_legacy_content(conn)
         seed_announcements(conn)
@@ -1504,6 +1562,10 @@ def announcement_payload(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlit
     ]
 
     counted_read_logins = read_logins.intersection(recipient_logins) if recipient_logins else read_logins
+    file_storage_name = row["file_storage_name"] if "file_storage_name" in row.keys() else None
+    file_name = row["file_name"] if "file_name" in row.keys() else None
+    file_mime = row["file_mime"] if "file_mime" in row.keys() else None
+    file_size = row["file_size"] if "file_size" in row.keys() else 0
     return {
         "id": row["id"],
         "title": row["title"],
@@ -1517,6 +1579,10 @@ def announcement_payload(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlit
         "readers": readers,
         "reactions": reactions,
         "comments": comments,
+        "fileName": file_name or "",
+        "fileMime": file_mime or "",
+        "fileSize": int(file_size or 0),
+        "fileUrl": f"/api/announcements/{quote(str(row['id']))}/download" if file_storage_name else "",
         "createdAt": row["created_at"],
     }
 
@@ -1562,6 +1628,10 @@ def tasks_snapshot(conn: sqlite3.Connection) -> dict:
 
 
 def report_payload(row: sqlite3.Row) -> dict:
+    file_name = row["file_name"] if "file_name" in row.keys() else None
+    file_mime = row["file_mime"] if "file_mime" in row.keys() else None
+    file_size = row["file_size"] if "file_size" in row.keys() else 0
+    file_storage_name = row["file_storage_name"] if "file_storage_name" in row.keys() else None
     return {
         "id": row["id"],
         "category": row["category"],
@@ -1572,6 +1642,10 @@ def report_payload(row: sqlite3.Row) -> dict:
         "ownerLogin": row["owner_login"],
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
+        "fileName": file_name or "",
+        "fileMime": file_mime or "",
+        "fileSize": int(file_size or 0),
+        "fileUrl": f"/api/reports/{quote(row['id'])}/download" if file_storage_name else "",
     }
 
 
@@ -1976,6 +2050,9 @@ class ProkomHandler(BaseHTTPRequestHandler):
                         return
                     tail = path.removeprefix("/api/announcements/")
                     parts = [unquote(part) for part in tail.split("/") if part]
+                    if len(parts) == 2 and method == "GET" and parts[1] == "download":
+                        self.serve_announcement_file(conn, user, parts[0])
+                        return
                     if len(parts) == 2 and method == "POST" and parts[1] == "read":
                         self.mark_announcement_read(conn, user, parts[0])
                         return
@@ -2030,9 +2107,17 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if not user:
                         self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
                         return
-                    report_id = unquote(path.removeprefix("/api/reports/"))
+                    report_path = path.removeprefix("/api/reports/")
+                    if report_path.endswith("/download") and method == "GET":
+                        report_id = unquote(report_path.removesuffix("/download").rstrip("/"))
+                        self.serve_report_file(conn, user, report_id)
+                        return
+                    report_id = unquote(report_path)
                     if method == "PATCH":
                         self.update_report(conn, user, report_id)
+                        return
+                    if method == "DELETE":
+                        self.delete_report(conn, user, report_id)
                         return
                 if path == "/api/requests" and method == "GET":
                     user = self.current_user(conn)
@@ -2475,12 +2560,30 @@ class ProkomHandler(BaseHTTPRequestHandler):
         self.send_json({"post": announcement_payload(conn, post, user), **announcements_snapshot(conn, user)})
 
     def create_announcement(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
-        payload = self.read_json()
-        title = str(payload.get("title", "")).strip()
-        body = str(payload.get("body", "")).strip()
-        priority = str(payload.get("priority", "normal"))
-        audience = str(payload.get("audience", "all"))
-        selected_logins = payload.get("recipientLogins", [])
+        content_type = self.headers.get("Content-Type", "")
+        upload = None
+        if "multipart/form-data" in content_type:
+            parsed = self.read_multipart_form()
+            if not parsed:
+                return
+            fields, files = parsed
+            title = str(fields.get("title", "")).strip()
+            body = str(fields.get("body", "")).strip()
+            priority = str(fields.get("priority", "normal"))
+            audience = str(fields.get("audience", "all"))
+            selected_raw = str(fields.get("recipientLogins", "[]"))
+            try:
+                selected_logins = json.loads(selected_raw)
+            except json.JSONDecodeError:
+                selected_logins = [login.strip() for login in selected_raw.split(",") if login.strip()]
+            upload = files.get("attachment")
+        else:
+            payload = self.read_json()
+            title = str(payload.get("title", "")).strip()
+            body = str(payload.get("body", "")).strip()
+            priority = str(payload.get("priority", "normal"))
+            audience = str(payload.get("audience", "all"))
+            selected_logins = payload.get("recipientLogins", [])
         if priority not in ("normal", "important", "urgent"):
             priority = "normal"
         if not title or not body:
@@ -2506,12 +2609,40 @@ class ProkomHandler(BaseHTTPRequestHandler):
 
         post_id = f"ann-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
         time_label = time.strftime("%H:%M")
+        file_name = ""
+        file_mime = ""
+        file_size = 0
+        file_storage_name = ""
+        if upload:
+            file_content = upload.get("content") or b""
+            file_name = str(upload.get("filename") or "zalacznik").strip() or "zalacznik"
+            file_mime = str(upload.get("mime") or mimetypes.guess_type(file_name)[0] or "application/octet-stream")
+            file_size = len(file_content)
+            file_storage_name = storage_filename(post_id, file_name)
+            ANNOUNCEMENT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            (ANNOUNCEMENT_UPLOAD_DIR / file_storage_name).write_bytes(file_content)
         conn.execute(
             """
-            INSERT INTO announcements(id, title, body, priority, author_login, time_label, created_at)
-            VALUES(?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO announcements(
+              id, title, body, priority, author_login, time_label,
+              file_name, file_mime, file_size, file_storage_name,
+              created_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (post_id, title, body, priority, user["login"], time_label, now_text()),
+            (
+                post_id,
+                title,
+                body,
+                priority,
+                user["login"],
+                time_label,
+                file_name,
+                file_mime,
+                file_size,
+                file_storage_name,
+                now_text(),
+            ),
         )
         for login in recipients:
             conn.execute("INSERT INTO announcement_recipients(post_id, user_login) VALUES(?, ?)", (post_id, login))
@@ -2537,6 +2668,35 @@ class ProkomHandler(BaseHTTPRequestHandler):
         response = announcements_snapshot(conn, user)
         response["post"] = announcement_payload(conn, self.announcement_row(conn, post_id), user)
         self.send_json(response, HTTPStatus.CREATED)
+
+    def serve_announcement_file(self, conn: sqlite3.Connection, user: sqlite3.Row, post_id: str) -> None:
+        post = self.announcement_row(conn, post_id)
+        if not post:
+            self.send_json({"error": "Nie znaleziono ogloszenia."}, HTTPStatus.NOT_FOUND)
+            return
+        storage_name = post["file_storage_name"] if "file_storage_name" in post.keys() else ""
+        if not storage_name:
+            self.send_json({"error": "Ogloszenie nie ma zalacznika."}, HTTPStatus.NOT_FOUND)
+            return
+        target = (ANNOUNCEMENT_UPLOAD_DIR / storage_name).resolve()
+        try:
+            target.relative_to(ANNOUNCEMENT_UPLOAD_DIR.resolve())
+        except ValueError:
+            self.send_json({"error": "Nieprawidlowa sciezka zalacznika."}, HTTPStatus.FORBIDDEN)
+            return
+        if not target.exists() or not target.is_file():
+            self.send_json({"error": "Plik zalacznika nie istnieje na serwerze."}, HTTPStatus.NOT_FOUND)
+            return
+        filename = post["file_name"] or f"{post_id}.bin"
+        mime = post["file_mime"] or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        raw = target.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}")
+        self.send_header("Cache-Control", "private, max-age=60")
+        self.end_headers()
+        self.wfile.write(raw)
 
     def mark_announcement_read(self, conn: sqlite3.Connection, user: sqlite3.Row, post_id: str) -> None:
         if not self.announcement_row(conn, post_id):
@@ -2740,21 +2900,58 @@ class ProkomHandler(BaseHTTPRequestHandler):
         self.send_json(response)
 
     def create_report(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
-        payload = self.read_json()
-        category = str(payload.get("category", "")).strip() or "Sprawa organizacyjna"
-        detail = str(payload.get("detail", "")).strip()
-        title = str(payload.get("title", "")).strip() or category
+        content_type = self.headers.get("Content-Type", "")
+        upload = None
+        if "multipart/form-data" in content_type:
+            parsed = self.read_multipart_form()
+            if not parsed:
+                return
+            fields, files = parsed
+            category = str(fields.get("category", "")).strip() or "Sprawa organizacyjna"
+            detail = str(fields.get("detail", "")).strip()
+            title = str(fields.get("title", "")).strip() or category
+            upload = files.get("attachment")
+        else:
+            payload = self.read_json()
+            category = str(payload.get("category", "")).strip() or "Sprawa organizacyjna"
+            detail = str(payload.get("detail", "")).strip()
+            title = str(payload.get("title", "")).strip() or category
         if not detail:
             self.send_json({"error": "Podaj opis zgloszenia."}, HTTPStatus.BAD_REQUEST)
             return
         report_id = f"report-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        file_name = file_mime = file_storage_name = None
+        file_size = 0
+        if upload and upload.get("content"):
+            file_content = upload["content"]
+            file_name = clean_upload_filename(str(upload.get("filename") or "zalacznik"))
+            file_mime = str(upload.get("mime") or mimetypes.guess_type(file_name)[0] or "application/octet-stream")
+            file_size = len(file_content)
+            file_storage_name = storage_filename(report_id, file_name)
+            REPORT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            (REPORT_UPLOAD_DIR / file_storage_name).write_bytes(file_content)
         conn.execute(
             """
             INSERT INTO internal_reports (
-              id, category, title, detail, status, owner_login, owner_name, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'Nowe', ?, ?, ?, ?)
+              id, category, title, detail, status, owner_login, owner_name,
+              file_name, file_mime, file_size, file_storage_name,
+              created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'Nowe', ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (report_id, category, title, detail, user["login"], user["display_name"], now_text(), now_text()),
+            (
+                report_id,
+                category,
+                title,
+                detail,
+                user["login"],
+                user["display_name"],
+                file_name,
+                file_mime,
+                file_size,
+                file_storage_name,
+                now_text(),
+                now_text(),
+            ),
         )
         conn.execute(
             "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_REPORT', ?)",
@@ -2789,6 +2986,61 @@ class ProkomHandler(BaseHTTPRequestHandler):
         response = reports_snapshot(conn)
         response["report"] = report_payload(conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone())
         self.send_json(response)
+
+    def delete_report(self, conn: sqlite3.Connection, user: sqlite3.Row, report_id: str) -> None:
+        report = conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone()
+        if not report:
+            self.send_json({"error": "Nie znaleziono zgloszenia."}, HTTPStatus.NOT_FOUND)
+            return
+        storage_name = report["file_storage_name"] if "file_storage_name" in report.keys() else ""
+        conn.execute("DELETE FROM internal_reports WHERE id = ?", (report_id,))
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'DELETE_REPORT', ?)",
+            (user["login"], report_id),
+        )
+        if storage_name:
+            target = (REPORT_UPLOAD_DIR / storage_name).resolve()
+            try:
+                target.relative_to(REPORT_UPLOAD_DIR.resolve())
+            except ValueError:
+                target = None
+            if target and target.exists() and target.is_file():
+                try:
+                    target.unlink()
+                except OSError:
+                    pass
+        response = reports_snapshot(conn)
+        response["deletedReport"] = {"id": report_id, "title": report["title"]}
+        self.send_json(response)
+
+    def serve_report_file(self, conn: sqlite3.Connection, user: sqlite3.Row, report_id: str) -> None:
+        report = conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone()
+        if not report:
+            self.send_json({"error": "Nie znaleziono zgloszenia."}, HTTPStatus.NOT_FOUND)
+            return
+        storage_name = report["file_storage_name"] if "file_storage_name" in report.keys() else ""
+        if not storage_name:
+            self.send_json({"error": "Zgloszenie nie ma zalacznika."}, HTTPStatus.NOT_FOUND)
+            return
+        target = (REPORT_UPLOAD_DIR / storage_name).resolve()
+        try:
+            target.relative_to(REPORT_UPLOAD_DIR.resolve())
+        except ValueError:
+            self.send_json({"error": "Nieprawidlowa sciezka zalacznika."}, HTTPStatus.FORBIDDEN)
+            return
+        if not target.exists() or not target.is_file():
+            self.send_json({"error": "Plik zalacznika nie istnieje na serwerze."}, HTTPStatus.NOT_FOUND)
+            return
+        filename = report["file_name"] or f"{report_id}.bin"
+        mime = report["file_mime"] or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        raw = target.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}")
+        self.send_header("Cache-Control", "private, max-age=60")
+        self.end_headers()
+        self.wfile.write(raw)
 
     def create_request(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
         payload = self.read_json()

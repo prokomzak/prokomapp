@@ -1,6 +1,6 @@
 window.PROKOM_SEED = {
   people: [
-    { login: "tadeusz", name: "Tadeusz", role: "Administrator", initials: "TA", status: "Niewbity", state: "out", active: true },
+    { login: "tadeusz", name: "Tadeusz", role: "Szef", initials: "TA", status: "Niewbity", state: "out", active: true },
     { login: "krystian", name: "Krystian", role: "Pracownik", initials: "KR", status: "Niewbity", state: "out", active: true },
     { login: "kuba", name: "Kuba", role: "Pracownik", initials: "KU", status: "Niewbity", state: "out", active: true },
     { login: "pawel", name: "Paweł", role: "Pracownik", initials: "PA", status: "Niewbity", state: "out", active: true },
@@ -11,7 +11,7 @@ window.PROKOM_SEED = {
       name: "Tadeusz",
       label: "Tadeusz",
       role: "admin",
-      teamRole: "Administrator",
+      teamRole: "Szef",
       initials: "TA",
       active: true,
     },

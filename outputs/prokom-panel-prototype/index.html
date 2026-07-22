@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f766e" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=47" />
+    <link rel="stylesheet" href="styles.css?v=57" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -25,7 +25,7 @@
         <form id="loginForm" class="login-form">
           <label>Konto
             <select id="accountSelect" autocomplete="username" required>
-              <option value="tadeusz">tadeusz - administrator</option>
+              <option value="tadeusz">tadeusz - szef</option>
               <option value="krystian">krystian - pracownik</option>
               <option value="kuba">kuba - pracownik</option>
               <option value="pawel">pawel - pracownik</option>
@@ -120,6 +120,18 @@
           </button>
 
           <div class="dashboard-grid" id="dashboardGrid">
+            <article class="widget wide feature-feed-widget" draggable="true">
+              <header class="widget-header">
+                <h3>Strumień</h3>
+                <div class="segmented">
+                  <button class="active" data-feed-filter="all" type="button">Wszystkie</button>
+                  <button data-feed-filter="boss" type="button">Od szefa</button>
+                  <button data-feed-filter="unread" type="button">Do uwagi</button>
+                </div>
+              </header>
+              <div class="feed-list" id="feedList"></div>
+            </article>
+
             <article class="widget wide" draggable="true">
               <header class="widget-header">
                 <h3>Mój dzień</h3>
@@ -132,13 +144,12 @@
               </form>
             </article>
 
-            <article class="widget">
+            <article class="widget dashboard-chat-widget" draggable="true">
               <header class="widget-header">
-                <h3>Zeszyt zmiany</h3>
-                <span class="pill amber" id="dashboardHandoverBadge">Nowe</span>
+                <h3>Ostatnie czaty</h3>
+                <span class="pill" id="dashboardChatBadge">0 nowych</span>
               </header>
-              <p class="note" id="dashboardHandoverNote">Brak notatek do przyjęcia.</p>
-              <button class="secondary-button" data-dashboard-handover type="button">Przyjąłem</button>
+              <div class="recent-chat-list" id="dashboardRecentChats"></div>
             </article>
 
             <article class="widget">
@@ -155,18 +166,6 @@
                 <span class="pill red" id="decisionCount">3</span>
               </header>
               <div class="decision-list" id="decisionList"></div>
-            </article>
-
-            <article class="widget wide">
-              <header class="widget-header">
-                <h3>Strumień</h3>
-                <div class="segmented">
-                  <button class="active" data-feed-filter="all" type="button">Wszystkie</button>
-                  <button data-feed-filter="boss" type="button">Od admina</button>
-                  <button data-feed-filter="unread" type="button">Nieprzeczytane</button>
-                </div>
-              </header>
-              <div class="feed-list" id="feedList"></div>
             </article>
 
             <article class="widget">
@@ -201,29 +200,32 @@
 
         <section id="announcements" class="view">
           <div class="split-layout">
-            <form class="panel form-panel" id="announcementForm">
+            <form class="panel form-panel" id="announcementForm" enctype="multipart/form-data">
               <header class="panel-header">
                 <h2>Nowe ogłoszenie</h2>
                 <span class="pill">Adresaci i odczyty</span>
               </header>
-              <label>Tytuł<input id="postTitle" required /></label>
-              <label>Treść<textarea id="postBody" rows="5"></textarea></label>
+              <label>Tytuł<input id="postTitle" name="title" required /></label>
+              <label>Treść<textarea id="postBody" name="body" rows="5"></textarea></label>
               <div class="form-row">
                 <label>Priorytet
-                  <select id="postPriority">
+                  <select id="postPriority" name="priority">
                     <option value="normal">Zwykłe</option>
                     <option value="important">Ważne</option>
                     <option value="urgent">Pilne</option>
                   </select>
                 </label>
                 <label>Do kogo
-                  <select id="postAudience">
+                  <select id="postAudience" name="audience">
                     <option value="all">Wszyscy</option>
                     <option value="boss">Tylko admin</option>
                     <option value="selected">Wybrane osoby</option>
                   </select>
                 </label>
               </div>
+              <label>Załącznik
+                <input id="postAttachment" name="attachment" type="file" />
+              </label>
               <fieldset>
                 <legend>Wybrane osoby</legend>
                 <div class="recipient-grid" id="recipientGrid"></div>
@@ -359,21 +361,21 @@
                 <span class="pill">Do admina</span>
               </header>
               <label>Kategoria
-                <select id="reportCategory">
+                <select id="reportCategory" name="category">
                   <option>Braki towaru</option>
                   <option>Awaria sprzętu</option>
                   <option>Sprawa organizacyjna</option>
                 </select>
               </label>
-              <label>Opis<textarea id="reportText" rows="5"></textarea></label>
-              <label>Zdjęcie / załącznik<input type="file" /></label>
+              <label>Opis<textarea id="reportText" name="detail" rows="5"></textarea></label>
+              <label>Zdjęcie / załącznik<input id="reportFileInput" name="attachment" type="file" /></label>
               <button class="primary-button" type="submit">Wyślij zgłoszenie</button>
             </form>
             <div class="panel">
               <header class="panel-header">
                 <h2>Zgłoszenia wewnętrzne</h2>
                 <div class="segmented">
-                  <button class="active" data-report-filter="open" type="button">Otwarte</button>
+                  <button class="active" data-report-filter="open" type="button">Wszystkie</button>
                   <button data-report-filter="mine" type="button">Moje</button>
                   <button data-report-filter="closed" type="button">Zamknięte</button>
                 </div>
@@ -428,16 +430,11 @@
             <div class="panel">
               <header class="panel-header">
                 <h2>Baza wiedzy</h2>
-                <span class="pill" id="kbSearchCount">0 dokumentów</span>
-              </header>
-              <form id="kbForm" class="kb-upload-form admin-only">
-                <div class="form-row">
-                  <label>Tytuł dokumentu<input id="kbTitleInput" name="title" required placeholder="Np. Instrukcja przyjęcia reklamacji" /></label>
-                  <label>Plik<input id="kbFileInput" name="document" required type="file" /></label>
+                <div class="panel-actions">
+                  <span class="pill" id="kbSearchCount">0 dokumentów</span>
+                  <button class="primary-button admin-only" id="addKnowledgeButton" type="button">Dodaj dokument</button>
                 </div>
-                <label>Opis<textarea id="kbDetailInput" name="detail" rows="3" placeholder="Krótki opis, kiedy używać dokumentu"></textarea></label>
-                <button class="primary-button" type="submit">Dodaj dokument</button>
-              </form>
+              </header>
               <label class="kb-search">Szukaj dokumentów<input id="kbSearchInput" type="search" placeholder="Nazwa, opis, typ pliku..." /></label>
               <div class="kb-list" id="kbList"></div>
             </div>
@@ -534,6 +531,7 @@
           <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
         </header>
         <p id="postDialogBody"></p>
+        <div id="postDialogAttachment"></div>
         <div class="read-box">
           <strong id="postReadCount">Odczytali 0/0</strong>
           <span id="postReadNames"></span>
@@ -603,6 +601,60 @@
       </form>
     </dialog>
 
+    <dialog id="calendarFormDialog" class="modal">
+      <form id="calendarForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Kalendarz</p>
+            <h2>Dodaj wydarzenie</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <label>Tytuł
+          <input id="calendarTitleInput" type="text" placeholder="Np. Spotkanie zespołu" required />
+        </label>
+        <div class="task-form-grid">
+          <label>Data
+            <input id="calendarDateInput" type="date" required />
+          </label>
+          <label>Godzina
+            <input id="calendarTimeInput" type="time" value="09:00" required />
+          </label>
+        </div>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Dodaj wydarzenie</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="knowledgeFormDialog" class="modal">
+      <form id="kbForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Baza wiedzy</p>
+            <h2>Dodaj dokument</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <div class="task-form-grid">
+          <label>Tytuł dokumentu
+            <input id="kbTitleInput" name="title" required placeholder="Np. Instrukcja przyjęcia reklamacji" />
+          </label>
+          <label>Plik
+            <input id="kbFileInput" name="document" required type="file" />
+          </label>
+        </div>
+        <label>Opis
+          <textarea id="kbDetailInput" name="detail" rows="3" placeholder="Krótki opis, kiedy używać dokumentu"></textarea>
+        </label>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Dodaj dokument</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="taskDialog" class="modal">
       <article class="modal-content">
         <header class="modal-header">
@@ -621,6 +673,7 @@
           <div><span>Utworzono</span><strong id="taskDialogCreated"></strong></div>
         </div>
         <menu>
+          <button class="secondary-button hidden" data-task-reopen-active type="button">Cofnij ukończenie</button>
           <button class="secondary-button danger-button" data-task-delete-active type="button">Usuń zadanie</button>
           <button class="primary-button" data-close-dialog type="button">Zamknij</button>
         </menu>
@@ -653,7 +706,7 @@
 
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
-    <script src="data.js?v=47"></script>
-    <script src="app.js?v=47"></script>
+    <script src="data.js?v=57"></script>
+    <script src="app.js?v=57"></script>
   </body>
 </html>
