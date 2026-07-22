@@ -2,6 +2,17 @@
 
 Projekt jest przygotowany jako jedna usluga: backend Python serwuje frontend oraz endpointy `/api`.
 
+## Aktualny stan plikow deploy
+
+Aktualizacja: 2026-07-22. Railway powinien uruchamiac projekt z katalogu glownego repozytorium:
+
+- `Dockerfile` buduje obraz z backendem i frontendem z `outputs/prokom-panel-prototype`.
+- `railway.json` wymusza builder `DOCKERFILE`.
+- backend czyta port z env `PORT`, ktory Railway ustawia automatycznie.
+- baza SQLite i uploady powinny trafic do Volume pod `/data`.
+
+Jesli na GitHubie ten plik nadal pokazuje stara date, to znaczy, ze commit nie zawieral zmiany w `DEPLOY_RAILWAY.md`. Sam redeploy moze byc wywolany pustym commitem, ale GitHub nie zmieni daty konkretnego pliku, dopoki nie zmieni sie jego tresc.
+
 ## Wymagane ustawienia Railway
 
 1. Utworz projekt z repozytorium GitHub.
@@ -53,6 +64,25 @@ PROKOM_DATA_DIR=/data
 4. Po zmianie Dockerfile wykonaj redeploy z czyszczeniem cache/build cache, jesli Railway dalej uruchamia stary obraz.
 
 Railway montuje Volume podczas startu kontenera. Ten Dockerfile uruchamia backend bez przelaczania na osobnego uzytkownika systemowego, zeby proces Pythona mial prawo zapisu do `/data`.
+
+## Wymuszenie nowego deploya
+
+Po zmianie plikow wykonaj:
+
+```powershell
+git add Dockerfile railway.json DEPLOY_RAILWAY.md outputs/prokom-panel-prototype
+git commit -m "Aktualizacja deploy Railway"
+git push origin main
+```
+
+Jesli nie ma zmian w plikach, a chcesz tylko wymusic rebuild Railway:
+
+```powershell
+git commit --allow-empty -m "Trigger Railway redeploy"
+git push origin main
+```
+
+Po pushu w Railway wejdz w usluge aplikacji i sprawdz, czy najnowszy deployment pokazuje SHA ostatniego commita z GitHuba. Jesli Railway pokazuje starsze SHA, uzyj w Railway opcji redeploy dla najnowszego commita albo odlacz i ponownie wskaz repozytorium/branch `main`.
 
 ## Lokalny test podobny do Railway
 
