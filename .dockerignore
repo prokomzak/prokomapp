@@ -1,0 +1,14 @@
+.git
+.agents
+.codex
+Python
+work
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.log
+outputs/prokom-lan-database/
+outputs/prokom-panel-prototype/uploads/
+outputs/prokom-panel-prototype/backend/*.log
+outputs/prokom-panel-prototype/backend/*.out.log
+outputs/prokom-panel-prototype/backend/*.err.log

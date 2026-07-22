@@ -1,0 +1,30 @@
+# Local Codex/workspace files
+.agents/
+.codex/
+Python/
+work/
+tmp*/
+
+# Local database and runtime data
+outputs/prokom-lan-database/
+outputs/prokom-panel-prototype/uploads/
+
+# Logs
+*.log
+*.out.log
+*.err.log
+outputs/prokom-panel-prototype/backend/*.log
+outputs/prokom-panel-prototype/backend/*.out.log
+outputs/prokom-panel-prototype/backend/*.err.log
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

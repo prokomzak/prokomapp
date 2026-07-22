@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f766e" />
+    <title>Panel Firmowy PRO-KOM</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css?v=47" />
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <div class="login-card">
+        <div class="brand login-brand">
+          <div class="brand-mark">PK</div>
+          <div>
+            <strong>PRO-KOM</strong>
+            <span>Panel firmowy</span>
+          </div>
+        </div>
+        <div>
+          <p class="eyebrow">Logowanie</p>
+          <h1>Wejdź na konto firmowe</h1>
+        </div>
+        <form id="loginForm" class="login-form">
+          <label>Konto
+            <select id="accountSelect" autocomplete="username" required>
+              <option value="tadeusz">tadeusz - administrator</option>
+              <option value="krystian">krystian - pracownik</option>
+              <option value="kuba">kuba - pracownik</option>
+              <option value="pawel">pawel - pracownik</option>
+            </select>
+          </label>
+          <label class="hidden" id="passwordField">Hasło<input id="passwordInput" autocomplete="current-password" type="password" inputmode="numeric" /></label>
+          <p class="login-error hidden" id="loginError">Wybierz istniejące konto.</p>
+          <button class="primary-button" type="submit">Zaloguj</button>
+        </form>
+      </div>
+    </section>
+
+    <div class="app-shell hidden" id="appShell">
+      <aside class="sidebar" aria-label="Nawigacja">
+        <div class="brand">
+          <div class="brand-mark">PK</div>
+          <div>
+            <strong>PRO-KOM</strong>
+            <span>Panel firmowy</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="dashboard">Tablica</button>
+          <button class="nav-item" data-view="announcements">Ogłoszenia</button>
+          <button class="nav-item" data-view="tasks">Zadania</button>
+          <button class="nav-item" data-view="time">Czas pracy</button>
+          <button class="nav-item" data-view="calendar">Kalendarz</button>
+          <button class="nav-item" data-view="reports">Zgłoszenia</button>
+          <button class="nav-item" data-view="chat">Czat</button>
+          <button class="nav-item" data-view="knowledge">Wiedza</button>
+          <button class="nav-item" data-view="team">Zespół</button>
+          <button class="nav-item admin-only" data-view="stats">Statystyki</button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="account-card">
+            <div class="avatar" id="currentUserAvatar">SZ</div>
+            <div>
+              <strong id="currentUserName">Tadeusz</strong>
+              <span id="currentUserRole">admin</span>
+            </div>
+          </div>
+          <label class="role-switch">
+            <span>Widok</span>
+            <select id="roleSelect">
+              <option value="admin">Admin</option>
+              <option value="employee">Pracownik</option>
+            </select>
+          </label>
+          <button id="themeToggle" class="ghost-button" type="button">Tryb ciemny</button>
+          <button id="logoutButton" class="ghost-button" type="button">Wyloguj</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="mobile-menu" id="menuToggle" type="button" aria-label="Menu">☰</button>
+          <div>
+            <p class="eyebrow" id="todayLabel">Dzisiaj</p>
+            <h1 id="viewTitle">Tablica dnia</h1>
+          </div>
+          <div class="topbar-actions">
+            <form class="topbar-search" id="globalSearchForm" role="search">
+              <input id="globalSearchInput" type="search" placeholder="Szukaj w panelu..." aria-label="Szukaj w panelu" />
+              <button class="search-button" type="submit">Szukaj</button>
+            </form>
+            <button class="bell" id="notificationsButton" type="button" aria-label="Powiadomienia">
+              <span>●</span>
+              <strong>7</strong>
+            </button>
+          </div>
+        </header>
+
+        <section id="dashboard" class="view active-view">
+          <div class="day-strip">
+            <div>
+              <p class="eyebrow" id="dashboardGreeting">Dzień dobry</p>
+              <h2>Najważniejsze sprawy na dziś</h2>
+            </div>
+            <div class="clock-card" data-clock-state="out">
+              <span id="clockStatus">Niewbity</span>
+              <strong id="liveTimer">00:00:00</strong>
+              <button id="clockButton" class="primary-button" type="button">Wbijam się</button>
+              <button id="breakButton" class="secondary-button" type="button" disabled>Przerwa</button>
+            </div>
+          </div>
+
+          <button class="urgent-strip hidden" data-open-post="" type="button">
+            <strong></strong>
+            <span></span>
+          </button>
+
+          <div class="dashboard-grid" id="dashboardGrid">
+            <article class="widget wide" draggable="true">
+              <header class="widget-header">
+                <h3>Mój dzień</h3>
+                <span class="pill green" id="myDayCount">0 z 0</span>
+              </header>
+              <div class="checklist" id="myDayList"></div>
+              <form class="inline-add-form" id="myDayForm">
+                <input id="myDayInput" type="text" placeholder="Dodaj wpis do mojego dnia" />
+                <button class="secondary-button" type="submit">Dodaj</button>
+              </form>
+            </article>
+
+            <article class="widget">
+              <header class="widget-header">
+                <h3>Zeszyt zmiany</h3>
+                <span class="pill amber" id="dashboardHandoverBadge">Nowe</span>
+              </header>
+              <p class="note" id="dashboardHandoverNote">Brak notatek do przyjęcia.</p>
+              <button class="secondary-button" data-dashboard-handover type="button">Przyjąłem</button>
+            </article>
+
+            <article class="widget">
+              <header class="widget-header">
+                <h3>Kto dziś pracuje</h3>
+                <span class="pill" id="peopleTodayCount">0 osób</span>
+              </header>
+              <div class="people-list" id="peopleToday"></div>
+            </article>
+
+            <article class="widget admin-widget">
+              <header class="widget-header">
+                <h3>Do decyzji</h3>
+                <span class="pill red" id="decisionCount">3</span>
+              </header>
+              <div class="decision-list" id="decisionList"></div>
+            </article>
+
+            <article class="widget wide">
+              <header class="widget-header">
+                <h3>Strumień</h3>
+                <div class="segmented">
+                  <button class="active" data-feed-filter="all" type="button">Wszystkie</button>
+                  <button data-feed-filter="boss" type="button">Od admina</button>
+                  <button data-feed-filter="unread" type="button">Nieprzeczytane</button>
+                </div>
+              </header>
+              <div class="feed-list" id="feedList"></div>
+            </article>
+
+            <article class="widget">
+              <header class="widget-header">
+                <h3>Nadchodzące</h3>
+                <span class="pill teal">3 dni</span>
+              </header>
+              <ol class="timeline" id="dashboardUpcomingList">
+                <li class="empty-state">Brak nadchodzących wydarzeń.</li>
+              </ol>
+            </article>
+
+            <article class="widget">
+              <header class="widget-header">
+                <h3>Wyróżnienia tygodnia</h3>
+                <span class="pill violet">0</span>
+              </header>
+              <p class="kudos muted">Brak wyróżnień w tym tygodniu.</p>
+            </article>
+
+            <article class="widget">
+              <header class="widget-header">
+                <h3>Szybka ankieta</h3>
+                <span class="pill teal">Brak</span>
+              </header>
+              <p class="note">Brak aktywnej ankiety.</p>
+              <div class="poll-meter"><span id="pollMeter" style="width: 0%"></span></div>
+              <span class="muted" id="pollResult">Brak głosów</span>
+            </article>
+          </div>
+        </section>
+
+        <section id="announcements" class="view">
+          <div class="split-layout">
+            <form class="panel form-panel" id="announcementForm">
+              <header class="panel-header">
+                <h2>Nowe ogłoszenie</h2>
+                <span class="pill">Adresaci i odczyty</span>
+              </header>
+              <label>Tytuł<input id="postTitle" required /></label>
+              <label>Treść<textarea id="postBody" rows="5"></textarea></label>
+              <div class="form-row">
+                <label>Priorytet
+                  <select id="postPriority">
+                    <option value="normal">Zwykłe</option>
+                    <option value="important">Ważne</option>
+                    <option value="urgent">Pilne</option>
+                  </select>
+                </label>
+                <label>Do kogo
+                  <select id="postAudience">
+                    <option value="all">Wszyscy</option>
+                    <option value="boss">Tylko admin</option>
+                    <option value="selected">Wybrane osoby</option>
+                  </select>
+                </label>
+              </div>
+              <fieldset>
+                <legend>Wybrane osoby</legend>
+                <div class="recipient-grid" id="recipientGrid"></div>
+              </fieldset>
+              <button class="primary-button" type="submit">Opublikuj</button>
+            </form>
+
+            <div class="panel">
+              <header class="panel-header">
+                <h2>Ogłoszenia</h2>
+                <div class="segmented">
+                  <button class="active" data-announcement-filter="active" type="button">Aktywne</button>
+                  <button data-announcement-filter="urgent" type="button">Pilne</button>
+                  <button data-announcement-filter="mine" type="button">Moje</button>
+                </div>
+              </header>
+              <div id="announcementList" class="announcement-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tasks" class="view">
+          <div class="toolbar">
+            <div class="segmented">
+              <button class="active" data-task-filter="all" type="button">Cała firma</button>
+              <button data-task-filter="mine" type="button">Moje zadania</button>
+              <button class="admin-only" data-task-filter="person" type="button">Per osoba</button>
+            </div>
+            <button id="addTaskButton" class="primary-button" type="button">Dodaj zadanie</button>
+          </div>
+          <div class="kanban" id="kanban"></div>
+        </section>
+
+        <section id="time" class="view">
+          <div class="time-grid">
+            <article class="panel">
+              <header class="panel-header">
+                <h2>Ewidencja czasu</h2>
+                <span class="pill green" id="timeLiveBadge">Na żywo</span>
+              </header>
+              <div class="time-hero">
+                <span id="timeHeroStatus">Dziś jeszcze niewbity</span>
+                <strong id="timeHeroTimer">00:00:00</strong>
+                <div>
+                  <button id="timeClockButton" class="primary-button" type="button">Wbijam się</button>
+                  <button id="correctionButton" class="secondary-button" type="button">Zgłoś korektę</button>
+                </div>
+              </div>
+              <div class="stats-row">
+                <div><span>Dziś</span><strong id="timeTodayStat">0h 00m</strong></div>
+                <div><span>Tydzień</span><strong id="timeWeekStat">0h 00m</strong></div>
+                <div><span>Miesiąc</span><strong id="timeMonthStat">0h 00m</strong></div>
+              </div>
+            </article>
+
+            <article class="panel admin-widget">
+              <header class="panel-header">
+                <h2>Puls firmy</h2>
+                <span class="pill green" id="timePulseBadge">Aktualne</span>
+              </header>
+              <div class="team-pulse">
+                <div><span>W pracy teraz</span><strong id="timeWorkingCount">0</strong></div>
+                <div><span>Na przerwie</span><strong id="timeBreakCount">0</strong></div>
+                <div><span>Nadgodziny tyg.</span><strong id="timeOvertimeWeek">0h 00m</strong></div>
+              </div>
+            </article>
+
+            <article class="panel wide-panel">
+              <header class="panel-header">
+                <h2>Grafik pracy</h2>
+                <button class="secondary-button admin-only" id="exportTimeButton" type="button">Eksport CSV</button>
+              </header>
+              <p class="muted admin-only" id="scheduleHelp">Admin może edytować komórki w formacie 08:00-16:00, wolne, urlop, L4 lub szkolenie.</p>
+              <p class="muted" id="exportStatus">Ostatni eksport: jeszcze nie wygenerowano</p>
+              <div class="schedule-table" id="scheduleTable"></div>
+            </article>
+
+            <form class="panel form-panel" id="leaveForm">
+              <header class="panel-header">
+                <h2>Wniosek urlopowy</h2>
+                <span class="pill">Obieg akceptacji</span>
+              </header>
+              <div class="form-row">
+                <label>Od<input id="leaveFrom" type="date" /></label>
+                <label>Do<input id="leaveTo" type="date" /></label>
+              </div>
+              <label>Typ
+                <select id="leaveType">
+                  <option>Urlop wypoczynkowy</option>
+                  <option>Urlop na żądanie</option>
+                  <option>L4</option>
+                  <option>Wyjście prywatne</option>
+                </select>
+              </label>
+              <label>Komentarz<textarea id="leaveComment" rows="3"></textarea></label>
+              <button class="primary-button" type="submit">Wyślij wniosek</button>
+            </form>
+
+            <article class="panel">
+              <header class="panel-header">
+                <h2>Wnioski i korekty</h2>
+                <span class="pill amber">Oczekujące</span>
+              </header>
+              <div class="request-list" id="requestList"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="calendar" class="view">
+          <div class="calendar-layout">
+            <div class="panel">
+              <header class="panel-header">
+                <h2>Lipiec 2026</h2>
+                <button class="primary-button" id="addEventButton" type="button">Dodaj wydarzenie</button>
+              </header>
+              <div class="calendar-grid" id="calendarGrid"></div>
+            </div>
+            <aside class="panel">
+              <header class="panel-header">
+                <h2>Nadchodzące</h2>
+                <span class="pill">RSVP</span>
+              </header>
+              <div class="event-list" id="eventList"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="reports" class="view">
+          <div class="split-layout">
+            <form class="panel form-panel" id="reportForm">
+              <header class="panel-header">
+                <h2>Nowe zgłoszenie</h2>
+                <span class="pill">Do admina</span>
+              </header>
+              <label>Kategoria
+                <select id="reportCategory">
+                  <option>Braki towaru</option>
+                  <option>Awaria sprzętu</option>
+                  <option>Sprawa organizacyjna</option>
+                </select>
+              </label>
+              <label>Opis<textarea id="reportText" rows="5"></textarea></label>
+              <label>Zdjęcie / załącznik<input type="file" /></label>
+              <button class="primary-button" type="submit">Wyślij zgłoszenie</button>
+            </form>
+            <div class="panel">
+              <header class="panel-header">
+                <h2>Zgłoszenia wewnętrzne</h2>
+                <div class="segmented">
+                  <button class="active" data-report-filter="open" type="button">Otwarte</button>
+                  <button data-report-filter="mine" type="button">Moje</button>
+                  <button data-report-filter="closed" type="button">Zamknięte</button>
+                </div>
+              </header>
+              <div class="report-list" id="reportList"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="chat" class="view">
+          <div class="chat-layout">
+            <aside class="panel conversations-panel">
+              <header class="panel-header">
+                <h2>Rozmowy</h2>
+                <span class="pill">Kontakty</span>
+              </header>
+              <div class="conversation-list" id="conversationList"></div>
+              <form class="chat-group-form admin-only" id="chatGroupForm">
+                <div>
+                  <strong>Nowa grupa</strong>
+                  <span class="muted">Tylko administrator</span>
+                </div>
+                <label>Nazwa grupy<input id="chatGroupName" type="text" placeholder="Np. Zmiana sobotnia" /></label>
+                <div class="chat-member-grid" id="chatGroupMembers"></div>
+                <button class="secondary-button" type="submit">Utwórz grupę</button>
+              </form>
+            </aside>
+            <article class="panel chat-panel">
+              <header class="panel-header">
+                <div>
+                  <h2 id="chatTitle">Cała firma</h2>
+                  <span class="muted">Statusy napisane/odczytane, załączniki i rozmowy grupowe</span>
+                </div>
+                <span class="pill green">Online</span>
+              </header>
+              <div class="message-list" id="messageList"></div>
+              <form class="chat-compose" id="chatForm">
+                <div class="attachment-preview hidden" id="chatAttachmentPreview"></div>
+                <div class="chat-compose-row">
+                  <button class="icon-button" data-chat-attach type="button" aria-label="Dodaj załączniki">📎</button>
+                  <input class="hidden-file-input" id="chatAttachmentInput" type="file" multiple />
+                  <input id="chatInput" placeholder="Napisz wiadomość..." />
+                  <button class="primary-button" type="submit">Wyślij</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <section id="knowledge" class="view">
+          <div class="knowledge-layout">
+            <div class="panel">
+              <header class="panel-header">
+                <h2>Baza wiedzy</h2>
+                <span class="pill" id="kbSearchCount">0 dokumentów</span>
+              </header>
+              <form id="kbForm" class="kb-upload-form admin-only">
+                <div class="form-row">
+                  <label>Tytuł dokumentu<input id="kbTitleInput" name="title" required placeholder="Np. Instrukcja przyjęcia reklamacji" /></label>
+                  <label>Plik<input id="kbFileInput" name="document" required type="file" /></label>
+                </div>
+                <label>Opis<textarea id="kbDetailInput" name="detail" rows="3" placeholder="Krótki opis, kiedy używać dokumentu"></textarea></label>
+                <button class="primary-button" type="submit">Dodaj dokument</button>
+              </form>
+              <label class="kb-search">Szukaj dokumentów<input id="kbSearchInput" type="search" placeholder="Nazwa, opis, typ pliku..." /></label>
+              <div class="kb-list" id="kbList"></div>
+            </div>
+            <aside class="panel">
+              <header class="panel-header">
+                <h2>Zeszyt zmiany</h2>
+                <span class="pill">Archiwum</span>
+              </header>
+              <form id="handoverForm" class="handover-form">
+                <label>Notatka dla następnej zmiany<textarea id="handoverText" rows="4" placeholder="Wpisz ważną informację dla kolejnej zmiany"></textarea></label>
+                <button class="secondary-button" type="submit">Zostaw notatkę</button>
+              </form>
+              <div class="handover-list" id="handoverList"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="team" class="view">
+          <form class="panel form-panel password-panel" id="passwordForm">
+            <header class="panel-header">
+              <div>
+                <h2>Zmiana hasła</h2>
+                <span class="muted">Pracownik zmienia własne hasło, administrator może resetować hasła kont poniżej</span>
+              </div>
+              <span class="pill green" id="passwordAccountLabel">Moje konto</span>
+            </header>
+            <div class="form-row">
+              <label>Aktualne hasło<input id="currentPasswordInput" autocomplete="current-password" type="password" placeholder="Jeśli konto już ma hasło" /></label>
+              <label>Nowe hasło<input id="newPasswordInput" autocomplete="new-password" type="password" minlength="4" required /></label>
+              <label>Powtórz nowe hasło<input id="repeatPasswordInput" autocomplete="new-password" type="password" minlength="4" required /></label>
+            </div>
+            <button class="primary-button" type="submit">Zmień moje hasło</button>
+          </form>
+
+          <div class="team-admin-layout admin-only">
+            <form class="panel form-panel" id="accountForm">
+              <header class="panel-header">
+                <div>
+                  <h2>Zarządzanie kontami</h2>
+                  <span class="muted">Dodawanie pracowników, role i dostęp do logowania</span>
+                </div>
+                <span class="pill red">Tylko admin</span>
+              </header>
+              <div class="form-row">
+                <label>Imię<input id="accountNameInput" required placeholder="Np. Ewa" /></label>
+                <label>Login<input id="accountLoginInput" required placeholder="np. ewa" /></label>
+              </div>
+              <div class="form-row">
+                <label>Stanowisko<input id="accountTeamRoleInput" required value="Pracownik" /></label>
+                <label>Uprawnienia
+                  <select id="accountRoleInput">
+                    <option value="employee">Pracownik</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </label>
+              </div>
+              <p class="muted">Nowe konto loguje się bez hasła i dostaje przypomnienie o ustawieniu własnego hasła.</p>
+              <button class="primary-button" type="submit">Dodaj konto</button>
+            </form>
+            <article class="panel">
+              <header class="panel-header">
+                <h2>Konta użytkowników</h2>
+                <span class="pill" id="accountCount">0 aktywnych</span>
+              </header>
+              <div class="account-management-list" id="accountManagementList"></div>
+            </article>
+          </div>
+          <div class="team-grid" id="teamGrid"></div>
+        </section>
+
+        <section id="stats" class="view">
+          <div class="stats-dashboard">
+            <article class="panel">
+              <h2>Raport tygodnia</h2>
+              <p id="statsSummary">Brak danych do raportu.</p>
+              <div class="bar-chart" id="statsBarChart" aria-label="Aktywność zespołu"></div>
+            </article>
+            <article class="panel">
+              <h2>Otwarte zgłoszenia</h2>
+              <div class="issue-list" id="statsIssueList"></div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="postDialog" class="modal">
+      <article class="modal-content">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="postDialogPriority">Ogłoszenie</p>
+            <h2 id="postDialogTitle">Ogłoszenie</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <p id="postDialogBody"></p>
+        <div class="read-box">
+          <strong id="postReadCount">Odczytali 0/0</strong>
+          <span id="postReadNames"></span>
+        </div>
+        <section class="post-social">
+          <div>
+            <h3>Reakcje</h3>
+            <div class="reaction-bar" id="postReactionBar"></div>
+          </div>
+          <div>
+            <h3>Komentarze</h3>
+            <div class="comment-list" id="postComments"></div>
+            <form class="comment-form" id="postCommentForm">
+              <input id="postCommentInput" type="text" placeholder="Dodaj komentarz do ogłoszenia" required />
+              <button class="secondary-button" type="submit">Dodaj</button>
+            </form>
+          </div>
+        </section>
+        <menu>
+          <button class="primary-button" data-confirm-read type="button">Przyjąłem do wiadomości</button>
+        </menu>
+      </article>
+    </dialog>
+
+    <dialog id="taskFormDialog" class="modal">
+      <form id="taskForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Nowe zadanie</p>
+            <h2>Dodaj zadanie</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <label>Tytuł
+          <input id="taskTitleInput" type="text" placeholder="Np. Zamówić etykiety do drukarki" required />
+        </label>
+        <label>Opis
+          <textarea id="taskDescriptionInput" rows="4" placeholder="Co dokładnie trzeba zrobić, gdzie sprawdzić szczegóły, jaki ma być efekt?"></textarea>
+        </label>
+        <div class="task-form-grid">
+          <label>Osoba
+            <select id="taskOwnerInput"></select>
+          </label>
+          <label>Termin
+            <input id="taskDueInput" type="text" value="dziś" />
+          </label>
+          <label>Priorytet
+            <select id="taskPriorityInput">
+              <option value="normal">Zwykły</option>
+              <option value="important">Ważny</option>
+              <option value="urgent">Pilny</option>
+            </select>
+          </label>
+          <label>Kolumna
+            <select id="taskColumnInput">
+              <option value="todo">Do zrobienia</option>
+              <option value="doing">W trakcie</option>
+              <option value="review">Do sprawdzenia</option>
+              <option value="done">Zrobione</option>
+            </select>
+          </label>
+        </div>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Dodaj zadanie</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="taskDialog" class="modal">
+      <article class="modal-content">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="taskDialogStatus">Zadanie</p>
+            <h2 id="taskDialogTitle">Zadanie</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <p class="note" id="taskDialogDescription"></p>
+        <div class="task-detail-grid">
+          <div><span>Osoba</span><strong id="taskDialogOwner"></strong></div>
+          <div><span>Termin</span><strong id="taskDialogDue"></strong></div>
+          <div><span>Priorytet</span><strong class="pill" id="taskDialogPriority"></strong></div>
+          <div><span>Źródło</span><strong id="taskDialogSource"></strong></div>
+          <div><span>Utworzono</span><strong id="taskDialogCreated"></strong></div>
+        </div>
+        <menu>
+          <button class="secondary-button danger-button" data-task-delete-active type="button">Usuń zadanie</button>
+          <button class="primary-button" data-close-dialog type="button">Zamknij</button>
+        </menu>
+      </article>
+    </dialog>
+
+    <dialog id="notificationsDialog" class="modal">
+      <form method="dialog">
+        <header class="modal-header">
+          <h2>Powiadomienia</h2>
+          <button class="icon-button" value="close" aria-label="Zamknij">×</button>
+        </header>
+        <div class="notification-list" id="notificationList"></div>
+        <menu>
+          <button class="secondary-button" id="markNotificationsButton" value="confirm">Oznacz wszystkie jako odczytane</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="searchDialog" class="modal search-modal">
+      <form method="dialog">
+        <header class="modal-header">
+          <h2>Wyszukiwarka</h2>
+          <button class="icon-button" value="close" aria-label="Zamknij">×</button>
+        </header>
+        <input id="searchInput" placeholder="Ogłoszenia, zadania, wydarzenia, baza wiedzy..." />
+        <div id="searchResults" class="search-results"></div>
+      </form>
+    </dialog>
+
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+    <script src="data.js?v=47"></script>
+    <script src="app.js?v=47"></script>
+  </body>
+</html>

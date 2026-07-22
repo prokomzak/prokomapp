@@ -1,0 +1,46 @@
+window.PROKOM_SEED = {
+  people: [
+    { login: "tadeusz", name: "Tadeusz", role: "Administrator", initials: "TA", status: "Niewbity", state: "out", active: true },
+    { login: "krystian", name: "Krystian", role: "Pracownik", initials: "KR", status: "Niewbity", state: "out", active: true },
+    { login: "kuba", name: "Kuba", role: "Pracownik", initials: "KU", status: "Niewbity", state: "out", active: true },
+    { login: "pawel", name: "Paweł", role: "Pracownik", initials: "PA", status: "Niewbity", state: "out", active: true },
+  ],
+  accounts: [
+    {
+      login: "tadeusz",
+      name: "Tadeusz",
+      label: "Tadeusz",
+      role: "admin",
+      teamRole: "Administrator",
+      initials: "TA",
+      active: true,
+    },
+    {
+      login: "krystian",
+      name: "Krystian",
+      label: "Krystian",
+      role: "employee",
+      teamRole: "Pracownik",
+      initials: "KR",
+      active: true,
+    },
+    {
+      login: "kuba",
+      name: "Kuba",
+      label: "Kuba",
+      role: "employee",
+      teamRole: "Pracownik",
+      initials: "KU",
+      active: true,
+    },
+    {
+      login: "pawel",
+      name: "Paweł",
+      label: "Paweł",
+      role: "employee",
+      teamRole: "Pracownik",
+      initials: "PA",
+      active: true,
+    },
+  ],
+};
