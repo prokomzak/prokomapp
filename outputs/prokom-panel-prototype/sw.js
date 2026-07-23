@@ -1,10 +1,10 @@
-const CACHE_NAME = "prokom-panel-app-v64";
+const CACHE_NAME = "prokom-panel-app-v67";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=64",
-  "./data.js?v=64",
-  "./app.js?v=64",
+  "./styles.css?v=67",
+  "./data.js?v=67",
+  "./app.js?v=67",
   "./manifest.webmanifest",
 ];
 

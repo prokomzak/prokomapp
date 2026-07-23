@@ -927,6 +927,18 @@ def initialize_database() -> None:
               FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS weekly_kudos (
+              id TEXT PRIMARY KEY,
+              week_start TEXT NOT NULL,
+              recipient_login TEXT NOT NULL,
+              recipient_name TEXT NOT NULL,
+              reason TEXT NOT NULL,
+              created_by TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (recipient_login) REFERENCES users(login) ON DELETE CASCADE,
+              FOREIGN KEY (created_by) REFERENCES users(login) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS quick_polls (
               id TEXT PRIMARY KEY,
               question TEXT NOT NULL,
@@ -972,6 +984,8 @@ def initialize_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_knowledge_articles_created ON knowledge_articles(created_at);
             CREATE INDEX IF NOT EXISTS idx_handover_notes_created ON handover_notes(created_at);
             CREATE INDEX IF NOT EXISTS idx_handover_accepts_user ON handover_accepts(user_login, accepted_at);
+            CREATE INDEX IF NOT EXISTS idx_weekly_kudos_week ON weekly_kudos(week_start, created_at);
+            CREATE INDEX IF NOT EXISTS idx_weekly_kudos_recipient ON weekly_kudos(recipient_login, week_start);
             CREATE INDEX IF NOT EXISTS idx_quick_polls_created ON quick_polls(created_at);
             CREATE INDEX IF NOT EXISTS idx_quick_poll_votes_user ON quick_poll_votes(user_login, voted_at);
             """
@@ -982,7 +996,7 @@ def initialize_database() -> None:
             "database_role": "LAN server local file",
             "planned_lan_ip": "192.168.1.101",
             "backend": "python-standard-library",
-            "schema_version": "18",
+            "schema_version": "19",
         }
         for key, value in meta.items():
             conn.execute(
@@ -1943,6 +1957,41 @@ def knowledge_snapshot(conn: sqlite3.Connection, user: sqlite3.Row) -> dict:
     }
 
 
+def weekly_kudos_payload(row: sqlite3.Row) -> dict:
+    recipient_display = row["recipient_display_name"] if "recipient_display_name" in row.keys() else ""
+    creator_display = row["creator_display_name"] if "creator_display_name" in row.keys() else ""
+    return {
+        "id": row["id"],
+        "weekStart": row["week_start"],
+        "recipientLogin": row["recipient_login"],
+        "recipientName": recipient_display or row["recipient_name"],
+        "reason": row["reason"],
+        "createdBy": row["created_by"] or "",
+        "creatorName": creator_display or row["created_by"] or "",
+        "createdAt": row["created_at"],
+    }
+
+
+def weekly_kudos_snapshot(conn: sqlite3.Connection, week_start: str | None = None) -> dict:
+    selected_week_start = normalize_week_start(week_start)
+    rows = conn.execute(
+        """
+        SELECT
+          k.*,
+          recipient.display_name AS recipient_display_name,
+          creator.display_name AS creator_display_name
+        FROM weekly_kudos k
+        LEFT JOIN users recipient ON recipient.login = k.recipient_login
+        LEFT JOIN users creator ON creator.login = k.created_by
+        WHERE k.week_start = ?
+        ORDER BY k.created_at DESC, k.id DESC
+        LIMIT 20
+        """,
+        (selected_week_start,),
+    ).fetchall()
+    return {"weekStart": selected_week_start, "kudos": [weekly_kudos_payload(row) for row in rows]}
+
+
 def quick_poll_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     try:
         options = json.loads(row["options_json"] or "[]")
@@ -2414,6 +2463,21 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if len(parts) == 1 and method == "DELETE":
                         self.delete_handover_note(conn, user, parts[0])
                         return
+                if path == "/api/kudos" and method == "GET":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    params = parse_qs(query)
+                    self.send_json(weekly_kudos_snapshot(conn, params.get("weekStart", [""])[0]))
+                    return
+                if path == "/api/kudos" and method == "POST":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.create_weekly_kudos(conn, user)
+                    return
                 if path == "/api/polls" and method == "GET":
                     user = self.current_user(conn)
                     if not user:
@@ -3549,6 +3613,47 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (user["login"], note_id),
         )
         self.send_json(knowledge_snapshot(conn, user))
+
+    def create_weekly_kudos(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
+        payload = self.read_json()
+        recipient_login = normalize_login(str(payload.get("recipientLogin", "")).strip())
+        reason = str(payload.get("reason", "")).strip()
+        week_start = normalize_week_start(str(payload.get("weekStart", "")).strip() or None)
+        if not recipient_login:
+            self.send_json({"error": "Wybierz osobe do wyroznienia."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not reason:
+            self.send_json({"error": "Dodaj opis wyroznienia."}, HTTPStatus.BAD_REQUEST)
+            return
+        if len(reason) > 500:
+            self.send_json({"error": "Opis wyroznienia jest za dlugi."}, HTTPStatus.BAD_REQUEST)
+            return
+        recipient = conn.execute(
+            """
+            SELECT *
+            FROM users
+            WHERE login = ? AND active = 1 AND app_role != 'root'
+            """,
+            (recipient_login,),
+        ).fetchone()
+        if not recipient:
+            self.send_json({"error": "Nie znaleziono aktywnego uzytkownika."}, HTTPStatus.NOT_FOUND)
+            return
+        kudos_id = f"kudos-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        conn.execute(
+            """
+            INSERT INTO weekly_kudos(id, week_start, recipient_login, recipient_name, reason, created_by, created_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?)
+            """,
+            (kudos_id, week_start, recipient["login"], recipient["display_name"], reason, user["login"], now_text()),
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_WEEKLY_KUDOS', ?)",
+            (user["login"], kudos_id),
+        )
+        response = weekly_kudos_snapshot(conn, week_start)
+        response["entry"] = next((entry for entry in response["kudos"] if entry["id"] == kudos_id), None)
+        self.send_json(response, HTTPStatus.CREATED)
 
     def create_quick_poll(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
         payload = self.read_json()

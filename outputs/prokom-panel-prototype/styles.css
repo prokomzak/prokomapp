@@ -419,6 +419,41 @@ textarea {
 
 .feature-feed-widget {
   grid-column: 1 / -1;
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--teal), var(--line) 42%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface), var(--surface-soft) 34%) 0%, var(--surface) 78%);
+  box-shadow:
+    0 22px 55px rgba(15, 118, 110, 0.12),
+    0 10px 22px rgba(23, 32, 29, 0.06);
+}
+
+.feature-feed-widget::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid color-mix(in srgb, var(--teal), transparent 72%);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.feature-feed-widget::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, var(--teal), var(--green), #2563eb);
+}
+
+.feature-feed-widget > * {
+  position: relative;
+  z-index: 1;
+}
+
+.feature-feed-widget .widget-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--teal), var(--line) 70%);
 }
 
 .feature-feed-widget .feed-list {
@@ -705,6 +740,29 @@ textarea {
 
 .feed-card-actions button {
   min-height: 36px;
+}
+
+.kudos-list {
+  display: grid;
+  gap: 10px;
+}
+
+.kudos-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--violet), var(--line) 68%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface), var(--violet) 5%);
+}
+
+.kudos-card .avatar {
+  align-self: start;
+}
+
+.kudos-card .note {
+  margin: 4px 0 6px;
 }
 
 .announcement-card > button {
@@ -1778,6 +1836,12 @@ legend {
   align-items: center;
 }
 
+.knowledge-detail-description {
+  margin-bottom: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .handover-form {
   display: grid;
   gap: 10px;
@@ -2496,6 +2560,18 @@ legend {
 
   .feature-feed-widget .feed-list {
     grid-template-columns: 1fr;
+  }
+
+  .feature-feed-widget {
+    padding: 14px;
+  }
+
+  .feature-feed-widget::before {
+    inset: 6px;
+  }
+
+  .feature-feed-widget .widget-header {
+    padding-bottom: 10px;
   }
 
   .calendar-grid {

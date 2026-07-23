@@ -64,6 +64,7 @@ let kbArticles = [];
 let calendarEvents = [];
 let timeSummary = null;
 let quickPolls = [];
+let weeklyKudos = [];
 let selectedScheduleWeekStart = "";
 let activeScheduleEdit = null;
 let wageRates = {};
@@ -90,6 +91,7 @@ let kbSearchQuery = "";
 let activePostId = null;
 let activeTaskId = null;
 let activeFeedItemId = null;
+let activeKnowledgeArticleId = null;
 let backendAvailable = false;
 let announcementPollTimer = null;
 let announcementPollInFlight = false;
@@ -112,6 +114,9 @@ const knowledgePollIntervalMs = 7000;
 let quickPollTimer = null;
 let quickPollInFlight = false;
 const quickPollIntervalMs = 8000;
+let kudosPollTimer = null;
+let kudosPollInFlight = false;
+const kudosPollIntervalMs = 8000;
 let presencePollTimer = null;
 let presencePollInFlight = false;
 const presencePollIntervalMs = 5000;
@@ -126,6 +131,7 @@ const storageKeys = {
   chatMessages: "prokom-chat-messages-v2",
   notificationReadIds: "prokom-notification-read-ids-v2",
   quickPolls: "prokom-quick-polls-v1",
+  weeklyKudos: "prokom-weekly-kudos-v1",
   wageRates: "prokom-wage-rates-v1",
 };
 
@@ -214,6 +220,10 @@ function getWeekStartDate(date = new Date()) {
 function getScheduleWeekStart() {
   if (!selectedScheduleWeekStart) selectedScheduleWeekStart = formatDateInput(getWeekStartDate());
   return selectedScheduleWeekStart;
+}
+
+function getCurrentWeekStartValue() {
+  return formatDateInput(getWeekStartDate());
 }
 
 function addDays(date, days) {
@@ -1404,7 +1414,7 @@ async function syncKnowledgeFromBackend(options = {}) {
         .filter((article) => !previousArticleIds.has(String(article.id)))
         .filter((article) => article.createdBy !== getActiveLogin())
         .forEach((article) => {
-          pushNotification("Baza wiedzy", `Dodano dokument: ${article.title}`, { view: "knowledge" });
+          pushNotification("Baza wiedzy", `Dodano dokument: ${article.title}`, { view: "knowledge", articleId: article.id });
         });
       handoverNotes
         .filter((note) => !previousNoteIds.has(String(note.id)))
@@ -1515,6 +1525,8 @@ function loadStoredState() {
   notificationReadIds = new Set(Array.isArray(storedNotificationReadIds) ? storedNotificationReadIds.map(String) : []);
   const storedQuickPolls = readStorage(storageKeys.quickPolls, []);
   quickPolls = Array.isArray(storedQuickPolls) ? storedQuickPolls.map(normalizeQuickPoll).filter(Boolean) : [];
+  const storedKudos = readStorage(storageKeys.weeklyKudos, []);
+  weeklyKudos = Array.isArray(storedKudos) ? storedKudos.map(normalizeKudosEntry).filter(Boolean) : [];
   const storedWageRates = readStorage(storageKeys.wageRates, {});
   wageRates = storedWageRates && typeof storedWageRates === "object" ? storedWageRates : {};
   normalizeRequests();
@@ -1529,6 +1541,206 @@ function saveAccountState() {
 
 function saveMyDayState() {
   writeStorage(storageKeys.myDay, myDayItems);
+}
+
+function makeKudosId() {
+  return `kudos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeKudosEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const reason = String(entry.reason || entry.text || "").trim();
+  const recipientLogin = normalizeLogin(entry.recipientLogin || entry.recipient_login || "");
+  const recipientName =
+    String(entry.recipientName || entry.recipient_name || "").trim() ||
+    getDisplayNameByLogin(recipientLogin) ||
+    "Użytkownik";
+  if (!reason || !recipientLogin) return null;
+  return {
+    id: String(entry.id || makeKudosId()),
+    recipientLogin,
+    recipientName,
+    reason,
+    weekStart: entry.weekStart || entry.week_start || getCurrentWeekStartValue(),
+    createdBy: normalizeLogin(entry.createdBy || entry.created_by || getActiveLogin()),
+    creatorName:
+      String(entry.creatorName || entry.creator_name || "").trim() ||
+      getDisplayNameByLogin(entry.createdBy || entry.created_by || getActiveLogin()) ||
+      getActiveName(),
+    createdAt: entry.createdAt || entry.created_at || new Date().toISOString(),
+  };
+}
+
+function saveKudosState() {
+  weeklyKudos = weeklyKudos.map(normalizeKudosEntry).filter(Boolean);
+  writeStorage(storageKeys.weeklyKudos, weeklyKudos);
+}
+
+function kudosSignature(value = weeklyKudos) {
+  return JSON.stringify(
+    value.map((entry) => [entry.id, entry.recipientLogin, entry.recipientName, entry.reason, entry.weekStart, entry.createdAt]),
+  );
+}
+
+function applyKudosSnapshot(snapshot) {
+  if (!Array.isArray(snapshot?.kudos)) return false;
+  weeklyKudos = snapshot.kudos.map(normalizeKudosEntry).filter(Boolean);
+  saveKudosState();
+  return true;
+}
+
+function missingKudosEndpoint(error) {
+  return String(error?.message || "").includes("Nie znaleziono endpointu");
+}
+
+async function syncKudosFromBackend(options = {}) {
+  if (!backendAvailable || !isLoggedIn()) return false;
+  const previousIds = new Set(weeklyKudos.map((entry) => String(entry.id)));
+  const previousSignature = kudosSignature();
+  try {
+    const weekStart = encodeURIComponent(options.weekStart || getCurrentWeekStartValue());
+    const snapshot = await apiRequest(`/kudos?weekStart=${weekStart}`, { headers: {} });
+    applyKudosSnapshot(snapshot);
+    const changed = previousSignature !== kudosSignature();
+    if (changed && options.notify) {
+      weeklyKudos
+        .filter((entry) => !previousIds.has(String(entry.id)))
+        .filter((entry) => entry.createdBy !== getActiveLogin())
+        .forEach((entry) => {
+          pushNotification("Wyróżnienie tygodnia", `${entry.recipientName}: ${entry.reason}`, { view: "dashboard" });
+        });
+    }
+    return changed;
+  } catch (error) {
+    if (missingKudosEndpoint(error)) return false;
+    if (!options.silent) showToast("Wyróżnienia", "Nie udało się pobrać wyróżnień tygodnia.");
+    return false;
+  }
+}
+
+async function pollKudos() {
+  if (kudosPollInFlight || document.hidden || !backendAvailable || !isLoggedIn()) return;
+  kudosPollInFlight = true;
+  try {
+    const changed = await syncKudosFromBackend({ notify: true, silent: true });
+    if (changed) renderKudos();
+  } finally {
+    kudosPollInFlight = false;
+  }
+}
+
+function startKudosPolling() {
+  if (kudosPollTimer || !backendAvailable || !isLoggedIn()) return;
+  kudosPollTimer = window.setInterval(pollKudos, kudosPollIntervalMs);
+}
+
+function stopKudosPolling() {
+  if (!kudosPollTimer) return;
+  window.clearInterval(kudosPollTimer);
+  kudosPollTimer = null;
+  kudosPollInFlight = false;
+}
+
+function renderKudosPersonOptions() {
+  const select = $("#kudosPersonSelect");
+  if (!select) return;
+  const users = activePeople();
+  select.innerHTML = users
+    .map((person) => `<option value="${escapeHtml(person.login)}">${escapeHtml(person.name)}</option>`)
+    .join("");
+  const activeLogin = getActiveLogin();
+  if (users.some((person) => person.login === activeLogin)) select.value = activeLogin;
+}
+
+function renderKudos() {
+  weeklyKudos = weeklyKudos.map(normalizeKudosEntry).filter(Boolean);
+  const currentWeek = getCurrentWeekStartValue();
+  const visibleKudos = weeklyKudos.filter((entry) => entry.weekStart === currentWeek).slice(0, 5);
+  const count = $("#kudosCount");
+  if (count) count.textContent = String(visibleKudos.length);
+  const list = $("#kudosList");
+  if (!list) return;
+  list.innerHTML = visibleKudos.length
+    ? visibleKudos
+        .map(
+          (entry) => `
+            <article class="kudos-card">
+              <span class="avatar">${escapeHtml(makeInitials(entry.recipientName))}</span>
+              <div>
+                <div class="card-line">
+                  <strong>${escapeHtml(entry.recipientName)}</strong>
+                  <span class="pill violet">Wyróżnienie</span>
+                </div>
+                <p class="note">${escapeHtml(entry.reason)}</p>
+                <span class="muted">Dodał: ${escapeHtml(entry.creatorName)} · ${escapeHtml(
+                  activityTimeLabel(entry.createdAt, "teraz"),
+                )}</span>
+              </div>
+            </article>
+          `,
+        )
+        .join("")
+    : `<div class="empty-state">Brak wyróżnień w tym tygodniu.</div>`;
+}
+
+function openKudosForm() {
+  renderKudosPersonOptions();
+  $("#kudosForm").reset();
+  renderKudosPersonOptions();
+  openDialog("#kudosFormDialog");
+  window.setTimeout(() => $("#kudosReasonInput")?.focus(), 0);
+}
+
+async function createKudosEntry(event) {
+  event.preventDefault();
+  const recipientLogin = normalizeLogin($("#kudosPersonSelect").value || "");
+  const reason = $("#kudosReasonInput").value.trim();
+  const recipient = activePeople().find((person) => person.login === recipientLogin);
+  if (!recipientLogin || !recipient) {
+    showToast("Wyróżnienie", "Wybierz osobę z listy.");
+    return;
+  }
+  if (!reason) {
+    showToast("Wyróżnienie", "Dodaj krótki opis wyróżnienia.");
+    $("#kudosReasonInput").focus();
+    return;
+  }
+  if (backendAvailable && isLoggedIn()) {
+    try {
+      const snapshot = await apiRequest("/kudos", {
+        method: "POST",
+        body: JSON.stringify({ recipientLogin, reason, weekStart: getCurrentWeekStartValue() }),
+      });
+      applyKudosSnapshot(snapshot);
+      renderKudos();
+      $("#kudosFormDialog").close();
+      event.target.reset();
+      showToast("Wyróżnienie dodane", recipient.name);
+      return;
+    } catch (error) {
+      if (!missingKudosEndpoint(error)) {
+        showToast("Nie dodano wyróżnienia", error.message || "Backend odrzucił zapis.");
+        return;
+      }
+    }
+  }
+  weeklyKudos.unshift(
+    normalizeKudosEntry({
+      id: makeKudosId(),
+      recipientLogin,
+      recipientName: recipient.name,
+      reason,
+      weekStart: getCurrentWeekStartValue(),
+      createdBy: getActiveLogin(),
+      creatorName: getActiveName(),
+      createdAt: new Date().toISOString(),
+    }),
+  );
+  saveKudosState();
+  renderKudos();
+  $("#kudosFormDialog").close();
+  event.target.reset();
+  showToast("Wyróżnienie dodane", recipient.name);
 }
 
 function makeQuickPollId() {
@@ -1884,6 +2096,7 @@ function refreshUserScopedUi() {
   renderMyDay();
   renderPeople();
   renderPosts(currentFeedFilter);
+  renderKudos();
   renderQuickPoll();
   renderKanban();
   renderRequests();
@@ -1949,6 +2162,7 @@ async function signIn(login, password = "") {
       await syncCalendarFromBackend({ silent: true });
       await syncKnowledgeFromBackend({ silent: true });
       await syncQuickPollsFromBackend({ silent: true });
+      await syncKudosFromBackend({ silent: true });
       await syncChatGroupsFromBackend({ silent: true });
       await syncVisibleChatMessagesFromBackend();
       startAnnouncementPolling();
@@ -1958,6 +2172,7 @@ async function signIn(login, password = "") {
       startCalendarPolling();
       startKnowledgePolling();
       startQuickPollPolling();
+      startKudosPolling();
       startChatPolling();
       startPresencePolling();
       $("#loginError").classList.add("hidden");
@@ -2003,6 +2218,7 @@ function signOut() {
   stopCalendarPolling();
   stopKnowledgePolling();
   stopQuickPollPolling();
+  stopKudosPolling();
   stopChatPolling();
   stopPresencePolling();
   if (backendAvailable) {
@@ -2032,6 +2248,7 @@ async function restoreSession() {
       await syncCalendarFromBackend({ silent: true });
       await syncKnowledgeFromBackend({ silent: true });
       await syncQuickPollsFromBackend({ silent: true });
+      await syncKudosFromBackend({ silent: true });
       await syncChatGroupsFromBackend({ silent: true });
       await syncVisibleChatMessagesFromBackend();
       startAnnouncementPolling();
@@ -2041,6 +2258,7 @@ async function restoreSession() {
       startCalendarPolling();
       startKnowledgePolling();
       startQuickPollPolling();
+      startKudosPolling();
       startChatPolling();
       startPresencePolling();
       refreshUserScopedUi();
@@ -3862,6 +4080,9 @@ async function openFeedItemSource(itemId) {
     kbSearchQuery = "";
     activateView("knowledge");
     renderKnowledgeState();
+    if (target.articleId) {
+      await openKnowledgeDetails(target.articleId);
+    }
     return;
   }
   activateView(target.view || "dashboard");
@@ -4215,6 +4436,56 @@ function articleMatchesKnowledgeSearch(article) {
   ).includes(query);
 }
 
+function findKnowledgeArticle(articleId) {
+  return kbArticles.find((article) => String(article.id) === String(articleId)) || null;
+}
+
+function formatKnowledgeDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "Brak daty";
+  const parsed = Date.parse(text.includes("T") ? text : text.replace(" ", "T"));
+  if (Number.isNaN(parsed)) return text;
+  return new Intl.DateTimeFormat("pl-PL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(parsed));
+}
+
+async function openKnowledgeDetails(articleId) {
+  let article = findKnowledgeArticle(articleId);
+  if (!article && backendAvailable && isLoggedIn()) {
+    await syncKnowledgeFromBackend({ silent: true });
+    article = findKnowledgeArticle(articleId);
+  }
+  if (!article) {
+    showToast("Baza wiedzy", "Nie znaleziono dokumentu.");
+    return;
+  }
+  activeKnowledgeArticleId = article.id;
+  $("#kbDialogType").textContent = article.type || "Dokument";
+  $("#kbDialogTitle").textContent = article.title || "Dokument";
+  $("#kbDialogDescription").textContent = article.detail || "Brak opisu dokumentu.";
+  $("#kbDialogAuthor").textContent = article.createdBy ? getDisplayNameByLogin(article.createdBy) : "Brak danych";
+  $("#kbDialogCreated").textContent = formatKnowledgeDate(article.createdAt);
+  $("#kbDialogFileName").textContent = article.fileName || "Brak pliku";
+  $("#kbDialogFileSize").textContent = article.fileSize ? formatFileSize(article.fileSize) : "Brak danych";
+  $("#kbDialogMime").textContent = article.fileMime || "Brak danych";
+  const downloadLink = $("#kbDialogDownload");
+  if (article.fileUrl) {
+    downloadLink.href = article.fileUrl;
+    downloadLink.download = article.fileName || article.title || "dokument";
+    downloadLink.classList.remove("hidden");
+  } else {
+    downloadLink.removeAttribute("href");
+    downloadLink.removeAttribute("download");
+    downloadLink.classList.add("hidden");
+  }
+  openDialog("#knowledgeDetailsDialog");
+}
+
 function canDeleteHandoverNote(note) {
   return currentUser?.role === "admin" || note.authorLogin === getActiveLogin();
 }
@@ -4350,13 +4621,16 @@ function renderKnowledge() {
             ${createdMeta ? `<span class="muted">${escapeHtml(createdMeta)}</span>` : ""}
             <div class="card-line">
               <span class="muted">${escapeHtml(fileMeta || "Brak pliku")}</span>
-              ${
-                article.fileUrl
-                  ? `<a class="secondary-button" href="${escapeHtml(article.fileUrl)}" download="${escapeHtml(
-                      article.fileName || article.title,
-                    )}">Pobierz</a>`
-                  : ""
-              }
+              <span class="card-actions">
+                <button class="secondary-button" data-kb-details="${escapeHtml(article.id)}" type="button">Szczegóły</button>
+                ${
+                  article.fileUrl
+                    ? `<a class="secondary-button" href="${escapeHtml(article.fileUrl)}" download="${escapeHtml(
+                        article.fileName || article.title,
+                      )}">Pobierz</a>`
+                    : ""
+                }
+              </span>
             </div>
           </div>
         </article>
@@ -4423,6 +4697,7 @@ function activateView(viewId) {
       syncCalendarFromBackend({ silent: true }),
       syncKnowledgeFromBackend({ silent: true }),
       syncQuickPollsFromBackend({ silent: true }),
+      syncKudosFromBackend({ silent: true }),
     ]).then((changes) => {
       if (!changes.some(Boolean)) return;
       renderKanban();
@@ -4431,6 +4706,7 @@ function activateView(viewId) {
       renderCalendar();
       renderKnowledge();
       renderQuickPoll();
+      renderKudos();
       renderPosts(currentFeedFilter);
       applyRole();
     });
@@ -5111,7 +5387,11 @@ async function createKnowledgeArticle(event) {
       form.reset();
       $("#knowledgeFormDialog").close();
       renderKnowledgeState();
-      pushNotification("Baza wiedzy", `Dodano dokument: ${articlePayload.title}`, { view: "knowledge" });
+      const createdArticle = result.article || kbArticles.find((article) => article.title === articlePayload.title);
+      pushNotification("Baza wiedzy", `Dodano dokument: ${articlePayload.title}`, {
+        view: "knowledge",
+        articleId: createdArticle?.id,
+      });
       showToast("Dokument dodany w bazie", "Nowa pozycja jest widoczna dla wszystkich użytkowników.");
       return;
     } catch (error) {
@@ -5119,8 +5399,9 @@ async function createKnowledgeArticle(event) {
       return;
     }
   }
+  const articleId = makeKnowledgeArticleId();
   kbArticles.unshift({
-    id: makeKnowledgeArticleId(),
+    id: articleId,
     ...articlePayload,
     fileUrl: URL.createObjectURL(file),
     createdBy: getActiveLogin(),
@@ -5128,7 +5409,7 @@ async function createKnowledgeArticle(event) {
   form.reset();
   $("#knowledgeFormDialog").close();
   renderKnowledgeState();
-  pushNotification("Baza wiedzy", `Dodano dokument: ${articlePayload.title}`, { view: "knowledge" });
+  pushNotification("Baza wiedzy", `Dodano dokument: ${articlePayload.title}`, { view: "knowledge", articleId });
   showToast("Dokument dodany", "Nowa pozycja jest widoczna w bazie wiedzy.");
 }
 
@@ -5139,6 +5420,7 @@ async function boot() {
   renderMyDay();
   renderPeople();
   renderPosts();
+  renderKudos();
   renderQuickPoll();
   renderKanban();
   renderSchedule();
@@ -5190,6 +5472,8 @@ async function boot() {
   $("#addEventButton").addEventListener("click", openCalendarForm);
   $("#calendarForm").addEventListener("submit", createCalendarEvent);
   $("#addKnowledgeButton").addEventListener("click", openKnowledgeForm);
+  $("#addKudosButton").addEventListener("click", openKudosForm);
+  $("#kudosForm").addEventListener("submit", createKudosEntry);
   $("#addPollButton").addEventListener("click", openPollForm);
   $("#pollForm").addEventListener("submit", createQuickPoll);
   $("#announcementForm").addEventListener("submit", createPost);
@@ -5413,6 +5697,12 @@ async function boot() {
     if (activeTaskDeleteButton && activeTaskId) {
       await deleteTask(activeTaskId);
       activeTaskId = null;
+      return;
+    }
+
+    const knowledgeDetailsButton = event.target.closest("[data-kb-details]");
+    if (knowledgeDetailsButton) {
+      await openKnowledgeDetails(knowledgeDetailsButton.dataset.kbDetails);
       return;
     }
 
@@ -5723,6 +6013,7 @@ async function boot() {
       pollCalendar();
       pollKnowledge();
       pollQuickPolls();
+      pollKudos();
       pollChatMessages();
       refreshPresence();
     }
@@ -5736,6 +6027,7 @@ async function boot() {
     pollCalendar();
     pollKnowledge();
     pollQuickPolls();
+    pollKudos();
     pollChatMessages();
     refreshPresence();
   });

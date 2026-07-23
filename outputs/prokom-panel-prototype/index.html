@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f766e" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=64" />
+    <link rel="stylesheet" href="styles.css?v=67" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -182,12 +182,17 @@
               </ol>
             </article>
 
-            <article class="widget">
+            <article class="widget kudos-widget">
               <header class="widget-header">
                 <h3>Wyróżnienia tygodnia</h3>
-                <span class="pill violet">0</span>
+                <div class="panel-actions">
+                  <span class="pill violet" id="kudosCount">0</span>
+                  <button class="secondary-button" id="addKudosButton" type="button">Dodaj</button>
+                </div>
               </header>
-              <p class="kudos muted">Brak wyróżnień w tym tygodniu.</p>
+              <div class="kudos-list" id="kudosList">
+                <div class="empty-state">Brak wyróżnień w tym tygodniu.</div>
+              </div>
             </article>
 
             <article class="widget quick-poll-widget">
@@ -684,6 +689,30 @@
       </form>
     </dialog>
 
+    <dialog id="knowledgeDetailsDialog" class="modal">
+      <article class="modal-content">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="kbDialogType">Dokument</p>
+            <h2 id="kbDialogTitle">Szczegóły dokumentu</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <p class="note knowledge-detail-description" id="kbDialogDescription"></p>
+        <div class="task-detail-grid">
+          <div><span>Dodał</span><strong id="kbDialogAuthor"></strong></div>
+          <div><span>Data dodania</span><strong id="kbDialogCreated"></strong></div>
+          <div><span>Nazwa pliku</span><strong id="kbDialogFileName"></strong></div>
+          <div><span>Rozmiar</span><strong id="kbDialogFileSize"></strong></div>
+          <div><span>Typ pliku</span><strong id="kbDialogMime"></strong></div>
+        </div>
+        <menu>
+          <a class="secondary-button hidden" id="kbDialogDownload" href="#" download>Pobierz dokument</a>
+          <button class="primary-button" data-close-dialog type="button">Zamknij</button>
+        </menu>
+      </article>
+    </dialog>
+
     <dialog id="taskDialog" class="modal">
       <article class="modal-content">
         <header class="modal-header">
@@ -794,6 +823,28 @@
       </form>
     </dialog>
 
+    <dialog id="kudosFormDialog" class="modal">
+      <form id="kudosForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Wyróżnienia tygodnia</p>
+            <h2>Dodaj wyróżnienie</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <label>Osoba
+          <select id="kudosPersonSelect" required></select>
+        </label>
+        <label>Za co?
+          <textarea id="kudosReasonInput" rows="3" required placeholder="Np. szybka pomoc przy zgłoszeniu klienta"></textarea>
+        </label>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Dodaj wpis</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="notificationsDialog" class="modal">
       <form method="dialog">
         <header class="modal-header">
@@ -820,7 +871,7 @@
 
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
-    <script src="data.js?v=64"></script>
-    <script src="app.js?v=64"></script>
+    <script src="data.js?v=67"></script>
+    <script src="app.js?v=67"></script>
   </body>
 </html>
