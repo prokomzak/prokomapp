@@ -143,7 +143,7 @@ ANNOUNCEMENT_SEED = []
 TASK_COLUMNS = ("todo", "doing", "review", "done")
 TASK_SEED = {column: [] for column in TASK_COLUMNS}
 
-REPORT_STATUSES = ("Nowe", "W realizacji", "Za\u0142atwione")
+REPORT_STATUSES = ("Nowe", "Przyj\u0119te", "Za\u0142atwione")
 REPORT_SEED = []
 
 REQUEST_STATUSES = ("Oczekuje", "Do sprawdzenia", "Zaakceptowane", "Odrzucone")
@@ -259,6 +259,24 @@ def schedule_cell_seconds(row: sqlite3.Row | dict | None) -> int:
     if start is None or end is None or end <= start:
         return 0
     return (end - start) * 60
+
+
+def parse_work_schedule_value(value: str) -> tuple[str, str, str, str | None]:
+    normalized_value = str(value or "").strip().replace("\u2013", "-").replace("\u2014", "-").replace("â€“", "-").replace("â€”", "-")
+    if not normalized_value:
+        return "", "", "", None
+    match = re.fullmatch(r"\s*([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)\s*", normalized_value)
+    if match:
+        start_time = f"{int(match.group(1)):02d}:{match.group(2)}"
+        end_time = f"{int(match.group(3)):02d}:{match.group(4)}"
+        if parse_schedule_minutes(end_time) <= parse_schedule_minutes(start_time):
+            return "", "", "", "Godzina konca musi byc pozniejsza niz start."
+        return start_time, end_time, "", None
+    allowed_notes = {"wolne", "urlop", "l4", "szkolenie"}
+    note = normalized_value[:40]
+    if note.lower() not in allowed_notes:
+        return "", "", "", "Wpisz zakres np. 08:00-16:00 albo: wolne, urlop, L4, szkolenie."
+    return "", "", note, None
 
 
 def b64url_encode(raw: bytes) -> str:
@@ -1080,7 +1098,10 @@ def normalize_report_status(value: str) -> str | None:
     )
     aliases = {
         "nowe": "Nowe",
-        "w realizacji": "W realizacji",
+        "przyjete": "Przyj\u0119te",
+        "przyj\u0119te": "Przyj\u0119te",
+        "przyjÄ™te": "Przyj\u0119te",
+        "w realizacji": "Przyj\u0119te",
         "zalatwione": "Za\u0142atwione",
         "załatwione": "Za\u0142atwione",
         "zaĹ‚atwione": "Za\u0142atwione",
@@ -1877,12 +1898,13 @@ def report_payload(row: sqlite3.Row) -> dict:
     file_mime = row["file_mime"] if "file_mime" in row.keys() else None
     file_size = row["file_size"] if "file_size" in row.keys() else 0
     file_storage_name = row["file_storage_name"] if "file_storage_name" in row.keys() else None
+    status = normalize_report_status(row["status"]) or row["status"] or "Nowe"
     return {
         "id": row["id"],
         "category": row["category"],
         "title": row["title"],
         "detail": row["detail"],
-        "status": row["status"],
+        "status": status,
         "owner": row["owner_name"],
         "ownerLogin": row["owner_login"],
         "createdAt": row["created_at"],
@@ -2057,6 +2079,45 @@ def weekly_kudos_snapshot(conn: sqlite3.Connection, week_start: str | None = Non
         (selected_week_start,),
     ).fetchall()
     return {"weekStart": selected_week_start, "kudos": [weekly_kudos_payload(row) for row in rows]}
+
+
+def normalize_audit_day(value: str | None = None) -> str:
+    text = str(value or "").strip()
+    if text:
+        try:
+            return datetime.strptime(text[:10], "%Y-%m-%d").date().strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return datetime.now().astimezone().date().strftime("%Y-%m-%d")
+
+
+def audit_log_payload(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "actorLogin": row["actor_login"] or "",
+        "actorName": row["actor_display_name"] or row["actor_login"] or "System",
+        "action": row["action"],
+        "details": row["details"] or "",
+        "createdAt": row["created_at"],
+    }
+
+
+def audit_log_snapshot(conn: sqlite3.Connection, day_value: str | None = None) -> dict:
+    selected_day = normalize_audit_day(day_value)
+    rows = conn.execute(
+        """
+        SELECT
+          a.*,
+          u.display_name AS actor_display_name
+        FROM audit_log a
+        LEFT JOIN users u ON u.login = a.actor_login
+        WHERE substr(a.created_at, 1, 10) = ?
+          AND a.actor_login IS NOT NULL
+        ORDER BY REPLACE(REPLACE(a.created_at, 'T', ' '), 'Z', '') DESC, a.id DESC
+        """,
+        (selected_day,),
+    ).fetchall()
+    return {"date": selected_day, "entries": [audit_log_payload(row) for row in rows]}
 
 
 def quick_poll_payload(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
@@ -2325,6 +2386,16 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if actor:
                         self.update_work_schedule(conn, actor)
                     return
+                if path == "/api/time/schedule/bulk" and method in ("POST", "PATCH"):
+                    actor = self.require_admin(conn)
+                    if actor:
+                        self.update_work_schedule_bulk(conn, actor)
+                    return
+                if path == "/api/time/schedule/copy-previous" and method == "POST":
+                    actor = self.require_admin(conn)
+                    if actor:
+                        self.copy_previous_work_schedule(conn, actor)
+                    return
                 if path == "/api/time/presence" and method in ("POST", "PATCH"):
                     user = self.current_user(conn)
                     if not user:
@@ -2544,6 +2615,13 @@ class ProkomHandler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
                         return
                     self.create_weekly_kudos(conn, user)
+                    return
+                if path == "/api/audit" and method == "GET":
+                    actor = self.require_admin(conn)
+                    if not actor:
+                        return
+                    params = parse_qs(query)
+                    self.send_json(audit_log_snapshot(conn, params.get("date", [""])[0]))
                     return
                 if path == "/api/polls" and method == "GET":
                     user = self.current_user(conn)
@@ -2784,6 +2862,129 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (actor["login"], f"{user_login}:{week_start}:{day_key}:{value}"),
         )
         self.send_json(time_summary(conn, actor, week_start))
+
+    def update_work_schedule_bulk(self, conn: sqlite3.Connection, actor: sqlite3.Row) -> None:
+        payload = self.read_json()
+        week_start = normalize_week_start(str(payload.get("weekStart", "")).strip() or None)
+        raw_logins = payload.get("userLogins", [])
+        raw_days = payload.get("days", [])
+        value = str(payload.get("value", "")).strip()
+        if not isinstance(raw_logins, list):
+            raw_logins = []
+        if not isinstance(raw_days, list):
+            raw_days = []
+        user_logins = list(dict.fromkeys(normalize_login(str(login)) for login in raw_logins if normalize_login(str(login))))
+        days = list(dict.fromkeys(str(day).strip().lower() for day in raw_days if str(day).strip().lower() in WORK_DAY_KEYS))
+        if not user_logins:
+            self.send_json({"error": "Wybierz co najmniej jedna osobe."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not days:
+            self.send_json({"error": "Wybierz co najmniej jeden dzien."}, HTTPStatus.BAD_REQUEST)
+            return
+        placeholders = ",".join("?" for _ in user_logins)
+        users = conn.execute(
+            f"""
+            SELECT login
+            FROM users
+            WHERE active = 1 AND app_role != 'root' AND login IN ({placeholders})
+            """,
+            tuple(user_logins),
+        ).fetchall()
+        valid_logins = {row["login"] for row in users}
+        if valid_logins != set(user_logins):
+            self.send_json({"error": "Wybrano nieaktywne albo nieistniejace konto."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        now = now_text()
+        cells = [(login, week_start, day) for login in user_logins for day in days]
+        if not value:
+            conn.executemany(
+                "DELETE FROM work_schedule_weeks WHERE user_login = ? AND week_start = ? AND day_key = ?",
+                cells,
+            )
+            action = "BULK_CLEAR_SCHEDULE"
+        else:
+            start_time, end_time, note, error = parse_work_schedule_value(value)
+            if error:
+                self.send_json({"error": error}, HTTPStatus.BAD_REQUEST)
+                return
+            conn.executemany(
+                """
+                INSERT INTO work_schedule_weeks(user_login, week_start, day_key, start_time, end_time, note, updated_by, updated_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_login, week_start, day_key) DO UPDATE SET
+                  start_time = excluded.start_time,
+                  end_time = excluded.end_time,
+                  note = excluded.note,
+                  updated_by = excluded.updated_by,
+                  updated_at = excluded.updated_at
+                """,
+                [
+                    (login, week_start, day, start_time or None, end_time or None, note, actor["login"], now)
+                    for login in user_logins
+                    for day in days
+                ],
+            )
+            action = "BULK_UPDATE_SCHEDULE"
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, ?, ?)",
+            (
+                actor["login"],
+                action,
+                json.dumps({"weekStart": week_start, "users": user_logins, "days": days, "value": value}, ensure_ascii=False),
+            ),
+        )
+        self.send_json(time_summary(conn, actor, week_start))
+
+    def copy_previous_work_schedule(self, conn: sqlite3.Connection, actor: sqlite3.Row) -> None:
+        payload = self.read_json()
+        week_start = normalize_week_start(str(payload.get("weekStart", "")).strip() or None)
+        target_date = datetime.strptime(week_start, "%Y-%m-%d").date()
+        source_week_start = (target_date - timedelta(days=7)).strftime("%Y-%m-%d")
+        source_rows = conn.execute(
+            """
+            SELECT s.*
+            FROM work_schedule_weeks s
+            JOIN users u ON u.login = s.user_login
+            WHERE s.week_start = ? AND u.active = 1 AND u.app_role != 'root'
+            """,
+            (source_week_start,),
+        ).fetchall()
+        if not source_rows:
+            self.send_json({"error": "Poprzedni tydzien nie ma wpisow do skopiowania."}, HTTPStatus.BAD_REQUEST)
+            return
+        now = now_text()
+        conn.execute("DELETE FROM work_schedule_weeks WHERE week_start = ?", (week_start,))
+        conn.executemany(
+            """
+            INSERT INTO work_schedule_weeks(user_login, week_start, day_key, start_time, end_time, note, updated_by, updated_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["user_login"],
+                    week_start,
+                    row["day_key"],
+                    row["start_time"],
+                    row["end_time"],
+                    row["note"],
+                    actor["login"],
+                    now,
+                )
+                for row in source_rows
+            ],
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'COPY_PREVIOUS_SCHEDULE', ?)",
+            (
+                actor["login"],
+                json.dumps({"from": source_week_start, "to": week_start, "cells": len(source_rows)}, ensure_ascii=False),
+            ),
+        )
+        response = time_summary(conn, actor, week_start)
+        response["copiedFromWeekStart"] = source_week_start
+        response["copiedCells"] = len(source_rows)
+        self.send_json(response)
 
     def create_user(self, conn: sqlite3.Connection, actor: sqlite3.Row) -> None:
         payload = self.read_json()

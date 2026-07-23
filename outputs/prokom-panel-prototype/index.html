@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f766e" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=67" />
+    <link rel="stylesheet" href="styles.css?v=74" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -59,6 +59,7 @@
           <button class="nav-item" data-view="knowledge">Wiedza</button>
           <button class="nav-item" data-view="team">Zespół</button>
           <button class="nav-item admin-only" data-view="stats">Statystyki</button>
+          <button class="nav-item admin-only" data-view="activity">Historia</button>
         </nav>
 
         <div class="sidebar-footer">
@@ -123,10 +124,15 @@
             <article class="widget wide feature-feed-widget" draggable="true">
               <header class="widget-header">
                 <h3>Tablica</h3>
-                <div class="segmented">
-                  <button class="active" data-feed-filter="all" type="button">Wszystkie</button>
-                  <button data-feed-filter="boss" type="button">Od szefa</button>
-                  <button data-feed-filter="unread" type="button">Do uwagi</button>
+                <div class="feed-controls">
+                  <div class="segmented">
+                    <button class="active" data-feed-filter="all" type="button">Wszystkie</button>
+                    <button data-feed-filter="boss" type="button">Od szefa</button>
+                    <button data-feed-filter="unread" type="button">Do uwagi</button>
+                  </div>
+                  <label class="feed-type-filter">Typ
+                    <select id="feedTypeFilter"></select>
+                  </label>
                 </div>
               </header>
               <div class="quick-board-actions" aria-label="Szybkie dodawanie">
@@ -308,6 +314,8 @@
                   <label class="week-picker">Tydzień<input id="scheduleWeekInput" type="week" /></label>
                   <button class="secondary-button" id="scheduleCurrentWeek" type="button">Bieżący</button>
                   <button class="secondary-button" id="scheduleNextWeek" type="button">Następny</button>
+                  <button class="secondary-button admin-only" id="copyPreviousScheduleButton" type="button">Kopiuj poprzedni</button>
+                  <button class="secondary-button admin-only" id="bulkScheduleButton" type="button">Wpis zbiorczy</button>
                   <button class="secondary-button admin-only" id="exportTimeButton" type="button">Eksport CSV</button>
                 </div>
               </header>
@@ -552,6 +560,42 @@
             </article>
           </div>
         </section>
+
+        <section id="activity" class="view admin-only">
+          <article class="panel activity-panel">
+            <header class="panel-header">
+              <div>
+                <h2>Historia aktywności</h2>
+                <p class="muted">Akcje użytkowników z wybranego dnia, od najnowszych do najstarszych.</p>
+              </div>
+              <form class="activity-filter" id="activityFilterForm">
+                <label>Data
+                  <input id="activityDateInput" type="date" required />
+                </label>
+                <label>Typ akcji
+                  <select id="activityTypeSelect">
+                    <option value="all">Wszystkie typy</option>
+                  </select>
+                </label>
+                <label>Sortowanie
+                  <select id="activitySortSelect">
+                    <option value="time-desc">Najnowsze najpierw</option>
+                    <option value="time-asc">Najstarsze najpierw</option>
+                    <option value="type">Według typu</option>
+                  </select>
+                </label>
+                <button class="secondary-button" type="submit">Pokaż</button>
+              </form>
+            </header>
+            <div class="activity-summary">
+              <span class="pill teal" id="activityDateLabel">Dzisiaj</span>
+              <span class="pill" id="activityCount">0 akcji</span>
+            </div>
+            <div class="activity-list" id="activityList">
+              <div class="empty-state">Brak aktywności dla wybranego dnia.</div>
+            </div>
+          </article>
+        </section>
       </main>
     </div>
 
@@ -772,6 +816,48 @@
       </form>
     </dialog>
 
+    <dialog id="bulkScheduleDialog" class="modal">
+      <form id="bulkScheduleForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="bulkScheduleContext">Grafik pracy</p>
+            <h2>Wpis zbiorczy</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <section class="bulk-schedule-section">
+          <strong>Osoby</strong>
+          <div class="bulk-choice-grid" id="bulkSchedulePeople"></div>
+        </section>
+        <section class="bulk-schedule-section">
+          <strong>Dni</strong>
+          <div class="bulk-choice-grid" id="bulkScheduleDays"></div>
+        </section>
+        <label>Typ wpisu
+          <select id="bulkScheduleMode">
+            <option value="work">Praca</option>
+            <option value="wolne">Wolne</option>
+            <option value="urlop">Urlop</option>
+            <option value="l4">L4</option>
+            <option value="szkolenie">Szkolenie</option>
+          </select>
+        </label>
+        <div class="task-form-grid" id="bulkScheduleWorkFields">
+          <label>Od
+            <input id="bulkScheduleStartInput" type="time" step="900" />
+          </label>
+          <label>Do
+            <input id="bulkScheduleEndInput" type="time" step="900" />
+          </label>
+        </div>
+        <menu>
+          <button class="secondary-button danger-button" id="bulkScheduleClearButton" type="button">Wyczyść wybrane</button>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Zapisz zbiorczo</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="feedItemDialog" class="modal">
       <article class="modal-content">
         <header class="modal-header">
@@ -851,6 +937,9 @@
           <h2>Powiadomienia</h2>
           <button class="icon-button" value="close" aria-label="Zamknij">×</button>
         </header>
+        <label class="notification-filter">Typ powiadomienia
+          <select id="notificationTypeFilter"></select>
+        </label>
         <div class="notification-list" id="notificationList"></div>
         <menu>
           <button class="secondary-button" id="markNotificationsButton" value="confirm">Oznacz wszystkie jako odczytane</button>
@@ -871,7 +960,7 @@
 
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
-    <script src="data.js?v=67"></script>
-    <script src="app.js?v=67"></script>
+    <script src="data.js?v=74"></script>
+    <script src="app.js?v=74"></script>
   </body>
 </html>

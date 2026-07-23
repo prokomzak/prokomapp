@@ -65,6 +65,11 @@ let calendarEvents = [];
 let timeSummary = null;
 let quickPolls = [];
 let weeklyKudos = [];
+let activityEntries = [];
+let selectedActivityDate = "";
+let selectedActivityType = "all";
+let selectedActivitySort = "time-desc";
+let currentNotificationFilter = "all";
 let selectedScheduleWeekStart = "";
 let activeScheduleEdit = null;
 let wageRates = {};
@@ -85,6 +90,7 @@ let elapsedBefore = 0;
 let timerId = null;
 let currentAnnouncementFilter = "active";
 let currentFeedFilter = "all";
+let currentFeedTypeFilter = "all";
 let currentTaskFilter = "all";
 let currentReportFilter = "open";
 let kbSearchQuery = "";
@@ -96,6 +102,12 @@ let backendAvailable = false;
 let announcementPollTimer = null;
 let announcementPollInFlight = false;
 const announcementPollIntervalMs = 6000;
+let feedStateLogin = "";
+let feedSeenInitialized = false;
+let feedSeenTimer = null;
+const pinnedFeedItemIds = new Set();
+const seenFeedItemIds = new Set();
+const freshFeedItemIds = new Set();
 let taskPollTimer = null;
 let taskPollInFlight = false;
 const taskPollIntervalMs = 5000;
@@ -133,6 +145,8 @@ const storageKeys = {
   quickPolls: "prokom-quick-polls-v1",
   weeklyKudos: "prokom-weekly-kudos-v1",
   wageRates: "prokom-wage-rates-v1",
+  feedPinnedIds: "prokom-feed-pinned-ids-v1",
+  feedSeenIds: "prokom-feed-seen-ids-v1",
 };
 
 const viewTitles = {
@@ -146,7 +160,32 @@ const viewTitles = {
   knowledge: "Baza wiedzy",
   team: "Zespół",
   stats: "Statystyki",
+  activity: "Historia aktywności",
 };
+
+const notificationFilters = [
+  { id: "all", label: "Wszystkie" },
+  { id: "chat", label: "Czat" },
+  { id: "tasks", label: "Zadania" },
+  { id: "reports", label: "Zgłoszenia" },
+  { id: "announcements", label: "Ogłoszenia" },
+  { id: "time", label: "Czas pracy" },
+  { id: "calendar", label: "Kalendarz" },
+  { id: "knowledge", label: "Baza wiedzy" },
+  { id: "team", label: "Zespół" },
+  { id: "dashboard", label: "Inne" },
+];
+
+const feedTypeFilters = [
+  { id: "all", label: "Wszystkie typy" },
+  { id: "announcements", label: "Ogłoszenia" },
+  { id: "reports", label: "Zgłoszenia" },
+  { id: "tasks", label: "Zadania" },
+  { id: "time", label: "Czas pracy" },
+  { id: "calendar", label: "Kalendarz" },
+  { id: "knowledge", label: "Baza wiedzy" },
+  { id: "handover", label: "Zeszyt zmiany" },
+];
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -264,6 +303,28 @@ function formatScheduleWeekRange(weekStart) {
   const start = localDateFromInput(weekStart) || getWeekStartDate();
   const end = addDays(start, 4);
   return `${formatScheduleDate(formatDateInput(start))} - ${formatScheduleDate(formatDateInput(end))}`;
+}
+
+const scheduleDayKeys = ["mon", "tue", "wed", "thu", "fri"];
+const scheduleDayLabels = ["Pon", "Wt", "Sr", "Czw", "Pt"];
+
+function scheduleDaysForWeek(weekStart) {
+  return scheduleDayKeys.map((key, index) => {
+    const date = addDays(localDateFromInput(weekStart) || getWeekStartDate(), index);
+    return {
+      key,
+      label: scheduleDayLabels[index],
+      date: formatScheduleDate(formatDateInput(date)),
+      isoDate: formatDateInput(date),
+    };
+  });
+}
+
+function getRenderedScheduleDays() {
+  const weekStart = getScheduleWeekStart();
+  const schedule = timeSummary?.schedule;
+  if (schedule?.weekStart === weekStart && schedule.days?.length) return schedule.days;
+  return scheduleDaysForWeek(weekStart);
 }
 
 function formatMoney(value) {
@@ -1000,6 +1061,12 @@ function makeReportId() {
   return `report-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function normalizeReportStatus(status) {
+  const normalized = String(status || "Nowe").trim();
+  if (normalized === "W realizacji") return "Przyjęte";
+  return normalized || "Nowe";
+}
+
 function normalizeReport(report) {
   const fileName = report.fileName || report.file_name || "";
   const fileMime = report.fileMime || report.file_mime || "";
@@ -1008,7 +1075,7 @@ function normalizeReport(report) {
     category: report.category || "Sprawa organizacyjna",
     title: report.title || report.category || "Zgłoszenie",
     detail: report.detail || "",
-    status: report.status || "Nowe",
+    status: normalizeReportStatus(report.status),
     owner: report.owner || getDisplayNameByLogin(report.ownerLogin || report.owner_login) || getActiveName(),
     ownerLogin: normalizeLogin(report.ownerLogin || report.owner_login || ""),
     createdAt: report.createdAt || report.created_at || "teraz",
@@ -2224,6 +2291,15 @@ function signOut() {
   if (backendAvailable) {
     apiRequest("/logout", { method: "POST" }).catch(() => {});
   }
+  if (feedSeenTimer) {
+    window.clearTimeout(feedSeenTimer);
+    feedSeenTimer = null;
+  }
+  feedStateLogin = "";
+  feedSeenInitialized = false;
+  pinnedFeedItemIds.clear();
+  seenFeedItemIds.clear();
+  freshFeedItemIds.clear();
   currentUser = null;
   localStorage.removeItem("prokom-user");
   renderAccountOptions("tadeusz");
@@ -2878,6 +2954,113 @@ function renderPostAttachment(post) {
   return renderFileAttachment(post);
 }
 
+function feedStorageKey(baseKey) {
+  return `${baseKey}:${normalizeLogin(getActiveLogin() || "guest")}`;
+}
+
+function replaceSetContents(targetSet, values = []) {
+  targetSet.clear();
+  values.map(String).filter(Boolean).forEach((value) => targetSet.add(value));
+}
+
+function ensureFeedBoardStateForActiveUser(force = false) {
+  if (!isLoggedIn()) return;
+  const login = normalizeLogin(getActiveLogin());
+  if (!force && feedStateLogin === login) return;
+  if (feedSeenTimer) {
+    window.clearTimeout(feedSeenTimer);
+    feedSeenTimer = null;
+  }
+  feedStateLogin = login;
+  freshFeedItemIds.clear();
+
+  const pinned = readStorage(feedStorageKey(storageKeys.feedPinnedIds), []);
+  replaceSetContents(pinnedFeedItemIds, Array.isArray(pinned) ? pinned : []);
+
+  const seen = readStorage(feedStorageKey(storageKeys.feedSeenIds), null);
+  feedSeenInitialized = Array.isArray(seen);
+  replaceSetContents(seenFeedItemIds, feedSeenInitialized ? seen : []);
+}
+
+function savePinnedFeedItems() {
+  if (!isLoggedIn()) return;
+  writeStorage(feedStorageKey(storageKeys.feedPinnedIds), [...pinnedFeedItemIds]);
+}
+
+function saveSeenFeedItems() {
+  if (!isLoggedIn()) return;
+  feedSeenInitialized = true;
+  writeStorage(feedStorageKey(storageKeys.feedSeenIds), [...seenFeedItemIds].slice(-500));
+}
+
+function feedTypeLabel(typeId) {
+  return feedTypeFilters.find((filter) => filter.id === typeId)?.label || "Inne";
+}
+
+function renderFeedTypeFilterOptions(items) {
+  const select = $("#feedTypeFilter");
+  if (!select) return;
+  const counts = new Map();
+  items.forEach((item) => {
+    counts.set(item.category, (counts.get(item.category) || 0) + 1);
+  });
+  if (!feedTypeFilters.some((filter) => filter.id === currentFeedTypeFilter)) currentFeedTypeFilter = "all";
+  select.innerHTML = feedTypeFilters
+    .map((filter) => {
+      const count = filter.id === "all" ? items.length : counts.get(filter.id) || 0;
+      return `<option value="${escapeHtml(filter.id)}">${escapeHtml(filter.label)} (${count})</option>`;
+    })
+    .join("");
+  select.value = currentFeedTypeFilter;
+}
+
+function decorateFeedItems(items) {
+  return items.map((item) => {
+    const pinned = pinnedFeedItemIds.has(item.id);
+    const isNew = feedSeenInitialized && !seenFeedItemIds.has(item.id);
+    if (isNew && $("#dashboard")?.classList.contains("active-view")) freshFeedItemIds.add(item.id);
+    return {
+      ...item,
+      pinned,
+      fresh: freshFeedItemIds.has(item.id),
+    };
+  });
+}
+
+function sortFeedItems(items) {
+  return items.slice().sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.sortValue - a.sortValue;
+  });
+}
+
+function scheduleFeedItemsSeen(items, allItems) {
+  if (!isLoggedIn() || !$("#dashboard")?.classList.contains("active-view")) return;
+  const targetItems = feedSeenInitialized ? items : allItems;
+  const ids = targetItems.map((item) => item.id).filter(Boolean);
+  if (!ids.length) return;
+  if (feedSeenTimer) window.clearTimeout(feedSeenTimer);
+  feedSeenTimer = window.setTimeout(() => {
+    ids.forEach((id) => seenFeedItemIds.add(id));
+    saveSeenFeedItems();
+    feedSeenTimer = null;
+  }, 1800);
+}
+
+function toggleFeedItemPin(itemId) {
+  if (!itemId || !isLoggedIn()) return;
+  ensureFeedBoardStateForActiveUser();
+  if (pinnedFeedItemIds.has(itemId)) {
+    pinnedFeedItemIds.delete(itemId);
+    showToast("Tablica", "Wpis odpięty.");
+  } else {
+    pinnedFeedItemIds.add(itemId);
+    showToast("Tablica", "Wpis przypięty na górze tablicy.");
+  }
+  savePinnedFeedItems();
+  renderPosts(currentFeedFilter);
+}
+
 function buildActivityFeedItems() {
   const fallbackBase = Date.now();
   const fallbackSort = (index) => fallbackBase - index;
@@ -2890,6 +3073,7 @@ function buildActivityFeedItems() {
       const [label, color] = priorityLabel(post.priority);
       return {
         id: `post:${post.id}`,
+        category: "announcements",
         type: "Ogłoszenie",
         title: post.title,
         body: post.body,
@@ -2909,6 +3093,7 @@ function buildActivityFeedItems() {
     }),
     ...reports.map((report, index) => ({
       id: `report:${report.id}`,
+      category: "reports",
       type: "Zgłoszenie",
       title: report.title,
       body: report.detail,
@@ -2916,9 +3101,9 @@ function buildActivityFeedItems() {
       time: activityTimeLabel(report.updatedAt || report.createdAt, "zgłoszenie"),
       sortValue: activitySortValue(report.updatedAt || report.createdAt, fallbackSort(100 + index)),
       pill: report.status,
-      color: report.status === "Nowe" ? "red" : report.status === "Załatwione" ? "green" : "amber",
+      color: reportStatusColor(report),
       unread: report.status === "Nowe",
-      attention: report.status !== "Załatwione",
+      attention: !reportIsClosed(report),
       fromAdmin: isAdminLogin(report.ownerLogin),
       actorLogin: report.ownerLogin,
       target: { view: "reports", reportId: report.id },
@@ -2927,6 +3112,7 @@ function buildActivityFeedItems() {
     })),
     ...kbArticles.map((article, index) => ({
       id: `knowledge:${article.id}`,
+      category: "knowledge",
       type: "Baza wiedzy",
       title: article.title,
       body: article.detail,
@@ -2947,6 +3133,7 @@ function buildActivityFeedItems() {
     })),
     ...calendarEvents.map((event, index) => ({
       id: `calendar:${event.id}`,
+      category: "calendar",
       type: "Kalendarz",
       title: event.title,
       body: `${event.date || "Data nieustalona"} · ${event.time || "Godzina nieustalona"}`,
@@ -2964,6 +3151,7 @@ function buildActivityFeedItems() {
     })),
     ...requests.map((request, index) => ({
       id: `request:${request.id}`,
+      category: "time",
       type: request.kind === "correction" ? "Korekta czasu" : "Wniosek",
       title: request.title,
       body: request.detail,
@@ -2981,6 +3169,7 @@ function buildActivityFeedItems() {
     })),
     ...taskItems.map((task, index) => ({
       id: `task:${task.id}`,
+      category: "tasks",
       type: "Zadanie",
       title: task.title,
       body: task.description,
@@ -2998,6 +3187,7 @@ function buildActivityFeedItems() {
     })),
     ...handoverNotes.map((note, index) => ({
       id: `handover:${note.id}`,
+      category: "handover",
       type: "Zeszyt zmiany",
       title: `Notatka od ${note.author}`,
       body: note.text,
@@ -3017,17 +3207,25 @@ function buildActivityFeedItems() {
   return rawItems.sort((a, b) => b.sortValue - a.sortValue);
 }
 
-function feedItemMatchesFilter(item) {
+function feedItemMatchesModeFilter(item) {
   if (currentFeedFilter === "boss") return item.fromAdmin;
   if (currentFeedFilter === "unread") return item.unread || item.attention;
   return true;
 }
 
+function feedItemMatchesTypeFilter(item) {
+  return currentFeedTypeFilter === "all" || item.category === currentFeedTypeFilter;
+}
+
 function renderActivityFeedItem(item) {
   return `
-    <article class="feed-card ${item.unread || item.attention ? "attention" : ""}">
+    <article class="feed-card ${item.unread || item.attention ? "attention" : ""} ${item.pinned ? "pinned" : ""}">
       <div class="feed-card-top">
-        <span class="pill ${item.color || ""}">${escapeHtml(item.type)}</span>
+        <span class="feed-type-row">
+          <span class="pill ${item.color || ""}">${escapeHtml(item.type)}</span>
+          ${item.fresh ? `<span class="feed-new-indicator" title="Nowy wpis od ostatniej wizyty" aria-label="Nowy wpis"></span>` : ""}
+          ${item.pinned ? `<span class="pill amber">Przypięte</span>` : ""}
+        </span>
         <span class="muted">${escapeHtml(item.time)}</span>
       </div>
       <div class="widget-header">
@@ -3038,6 +3236,9 @@ function renderActivityFeedItem(item) {
       <div class="feed-meta">${escapeHtml(item.meta)}</div>
       ${item.extraHtml || ""}
       <div class="feed-card-actions">
+        <button class="secondary-button" data-feed-pin="${escapeHtml(item.id)}" type="button">${
+          item.pinned ? "Odepnij" : "Przypnij"
+        }</button>
         <button class="secondary-button" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
         <button class="secondary-button" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
       </div>
@@ -3128,10 +3329,15 @@ function renderUrgentStrip() {
 
 function renderPosts(filter = "all") {
   currentFeedFilter = filter;
-  const feedItems = buildActivityFeedItems().filter(feedItemMatchesFilter).slice(0, 16);
+  ensureFeedBoardStateForActiveUser();
+  const allFeedItems = decorateFeedItems(buildActivityFeedItems());
+  const modeFilteredItems = allFeedItems.filter(feedItemMatchesModeFilter);
+  renderFeedTypeFilterOptions(modeFilteredItems);
+  const feedItems = sortFeedItems(modeFilteredItems.filter(feedItemMatchesTypeFilter)).slice(0, 16);
   $("#feedList").innerHTML = feedItems.length
     ? feedItems.map(renderActivityFeedItem).join("")
     : `<div class="empty-state">Brak aktywności pasującej do wybranego filtra.</div>`;
+  scheduleFeedItemsSeen(feedItems, allFeedItems);
   renderUrgentStrip();
 
   const announcementPosts = posts.filter((post) => {
@@ -3608,6 +3814,164 @@ async function clearScheduleEditor() {
   if (saved) $("#scheduleEditorDialog").close();
 }
 
+function renderBulkSchedulePeople() {
+  const box = $("#bulkSchedulePeople");
+  if (!box) return;
+  const source = timeSummary?.schedule?.rows?.length
+    ? timeSummary.schedule.rows.map((row) => ({ login: row.login, name: row.name }))
+    : activePeople();
+  box.innerHTML = source
+    .filter((person) => person.login && person.active !== false)
+    .map(
+      (person) => `
+        <label>
+          <input data-bulk-schedule-user type="checkbox" value="${escapeHtml(person.login)}" checked />
+          <span>${escapeHtml(person.name)}</span>
+        </label>
+      `,
+    )
+    .join("");
+}
+
+function renderBulkScheduleDays() {
+  const box = $("#bulkScheduleDays");
+  if (!box) return;
+  box.innerHTML = getRenderedScheduleDays()
+    .map(
+      (day) => `
+        <label>
+          <input data-bulk-schedule-day type="checkbox" value="${escapeHtml(day.key)}" checked />
+          <span>${escapeHtml(day.date || day.label)} ${day.isoDate ? `<small>${escapeHtml(day.isoDate)}</small>` : ""}</span>
+        </label>
+      `,
+    )
+    .join("");
+}
+
+function updateBulkScheduleMode() {
+  const mode = $("#bulkScheduleMode")?.value || "work";
+  const workFields = $("#bulkScheduleWorkFields");
+  const startInput = $("#bulkScheduleStartInput");
+  const endInput = $("#bulkScheduleEndInput");
+  const isWork = mode === "work";
+  workFields?.classList.toggle("hidden", !isWork);
+  if (startInput) startInput.required = isWork;
+  if (endInput) endInput.required = isWork;
+  if (!isWork) {
+    if (startInput) startInput.value = "";
+    if (endInput) endInput.value = "";
+  }
+}
+
+function openBulkScheduleForm() {
+  if (role !== "admin") return;
+  const form = $("#bulkScheduleForm");
+  form?.reset();
+  const context = $("#bulkScheduleContext");
+  if (context) context.textContent = `Grafik: ${formatScheduleWeekRange(getScheduleWeekStart())}`;
+  renderBulkSchedulePeople();
+  renderBulkScheduleDays();
+  const mode = $("#bulkScheduleMode");
+  const startInput = $("#bulkScheduleStartInput");
+  const endInput = $("#bulkScheduleEndInput");
+  if (mode) mode.value = "work";
+  if (startInput) startInput.value = "08:00";
+  if (endInput) endInput.value = "16:00";
+  updateBulkScheduleMode();
+  openDialog("#bulkScheduleDialog");
+  window.setTimeout(() => startInput?.focus(), 0);
+}
+
+function selectedBulkScheduleLogins() {
+  return $$("[data-bulk-schedule-user]:checked").map((input) => normalizeLogin(input.value)).filter(Boolean);
+}
+
+function selectedBulkScheduleDays() {
+  return $$("[data-bulk-schedule-day]:checked").map((input) => input.value).filter(Boolean);
+}
+
+function bulkScheduleEditorValue() {
+  const mode = $("#bulkScheduleMode")?.value || "work";
+  if (mode !== "work") return mode;
+  const start = $("#bulkScheduleStartInput")?.value || "";
+  const end = $("#bulkScheduleEndInput")?.value || "";
+  const startMinutes = timeToMinutes(start);
+  const endMinutes = timeToMinutes(end);
+  if (startMinutes === null || endMinutes === null) {
+    showToast("Uzupelnij godziny", "Wybierz godzine startu i konca pracy.");
+    return null;
+  }
+  if (endMinutes <= startMinutes) {
+    showToast("Popraw godziny", "Godzina konca musi byc pozniejsza niz start.");
+    return null;
+  }
+  return `${start}-${end}`;
+}
+
+async function saveBulkScheduleValue(value) {
+  if (!backendAvailable || role !== "admin") return false;
+  const userLogins = selectedBulkScheduleLogins();
+  const days = selectedBulkScheduleDays();
+  if (!userLogins.length) {
+    showToast("Wpis zbiorczy", "Wybierz co najmniej jedna osobe.");
+    return false;
+  }
+  if (!days.length) {
+    showToast("Wpis zbiorczy", "Wybierz co najmniej jeden dzien.");
+    return false;
+  }
+  try {
+    const result = await apiRequest("/time/schedule/bulk", {
+      method: "PATCH",
+      body: JSON.stringify({ weekStart: getScheduleWeekStart(), userLogins, days, value }),
+    });
+    applyTimeSummary(result);
+    showToast(
+      value ? "Grafik zapisany zbiorczo" : "Grafik wyczyszczony",
+      `${userLogins.length} osob, ${days.length} dni.`,
+    );
+    return true;
+  } catch (error) {
+    showToast("Nie zapisano grafiku", error.message || "Backend odrzucil wpis zbiorczy.");
+    await syncTimeSummaryFromBackend({ silent: true });
+    return false;
+  }
+}
+
+async function saveBulkScheduleForm(event) {
+  event.preventDefault();
+  const value = bulkScheduleEditorValue();
+  if (value === null) return;
+  const saved = await saveBulkScheduleValue(value);
+  if (saved) $("#bulkScheduleDialog")?.close();
+}
+
+async function clearBulkScheduleForm() {
+  const saved = await saveBulkScheduleValue("");
+  if (saved) $("#bulkScheduleDialog")?.close();
+}
+
+async function copyPreviousScheduleWeek() {
+  if (!backendAvailable || role !== "admin") return;
+  const weekStart = getScheduleWeekStart();
+  const confirmed = window.confirm(
+    `Skopiowac grafik z poprzedniego tygodnia do ${formatScheduleWeekRange(
+      weekStart,
+    )}? Obecne wpisy w tym tygodniu zostana zastapione.`,
+  );
+  if (!confirmed) return;
+  try {
+    const result = await apiRequest("/time/schedule/copy-previous", {
+      method: "POST",
+      body: JSON.stringify({ weekStart }),
+    });
+    applyTimeSummary(result);
+    showToast("Grafik skopiowany", `Skopiowano ${result.copiedCells || 0} wpisow z poprzedniego tygodnia.`);
+  } catch (error) {
+    showToast("Nie skopiowano grafiku", error.message || "Backend odrzucil kopiowanie.");
+  }
+}
+
 async function setScheduleWeek(weekStart) {
   selectedScheduleWeekStart = formatDateInput(getWeekStartDate(localDateFromInput(weekStart) || getWeekStartDate()));
   renderSchedule();
@@ -3691,6 +4055,10 @@ function reportIsClosed(report) {
   return report.status === "Załatwione";
 }
 
+function reportIsAccepted(report) {
+  return report.status === "Przyjęte";
+}
+
 function reportStatusColor(report) {
   if (report.status === "Nowe") return "red";
   if (reportIsClosed(report)) return "green";
@@ -3722,10 +4090,11 @@ function renderReports() {
           `
         : `
             <button class="secondary-button admin-widget" data-report-task="${report.id}" type="button">Utwórz zadanie</button>
+            <button class="secondary-button" data-report-accept="${report.id}" type="button" ${reportIsAccepted(report) ? "disabled" : ""}>${reportIsAccepted(report) ? "Przyjęte" : "Przyjmij"}</button>
             <button class="secondary-button" data-report-close="${report.id}" type="button">Oznacz załatwione</button>
           `;
       return `
-        <article class="report-card ${isClosed ? "is-complete" : ""}">
+        <article class="report-card ${isClosed ? "is-complete" : ""} ${reportIsAccepted(report) ? "is-accepted" : ""}">
           <div class="card-line">
             <strong>${escapeHtml(report.title)}</strong>
             <span class="pill ${reportStatusColor(report)}">${escapeHtml(report.status)}</span>
@@ -3787,6 +4156,192 @@ function renderStats() {
     : `<div class="empty-state">Brak otwartych zgłoszeń.</div>`;
 }
 
+const activityActionLabels = {
+  LOGIN: "Logowanie",
+  UPDATE_PRESENCE: "Zmiana obecności",
+  CLEAR_SCHEDULE: "Wyczyszczenie grafiku",
+  UPDATE_SCHEDULE: "Aktualizacja grafiku",
+  CREATE_USER: "Utworzenie konta",
+  UPDATE_USER: "Aktualizacja konta",
+  DELETE_USER: "Usunięcie konta",
+  CHANGE_PASSWORD: "Zmiana hasła",
+  CREATE_ANNOUNCEMENT: "Dodanie ogłoszenia",
+  CREATE_ANNOUNCEMENT_COMMENT: "Komentarz pod ogłoszeniem",
+  CREATE_TASK: "Dodanie zadania",
+  UPDATE_TASK: "Aktualizacja zadania",
+  DELETE_TASK: "Usunięcie zadania",
+  CREATE_REPORT: "Dodanie zgłoszenia",
+  UPDATE_REPORT: "Aktualizacja zgłoszenia",
+  DELETE_REPORT: "Usunięcie zgłoszenia",
+  CREATE_REQUEST: "Dodanie wniosku",
+  UPDATE_REQUEST: "Aktualizacja wniosku",
+  CREATE_CALENDAR_EVENT: "Dodanie wydarzenia",
+  CALENDAR_RSVP: "Potwierdzenie wydarzenia",
+  CREATE_KNOWLEDGE_ARTICLE: "Dodanie dokumentu",
+  CREATE_HANDOVER_NOTE: "Dodanie notatki",
+  ACCEPT_HANDOVER_NOTE: "Przyjęcie notatki",
+  DELETE_HANDOVER_NOTE: "Usunięcie notatki",
+  CREATE_WEEKLY_KUDOS: "Dodanie wyróżnienia",
+  CREATE_POLL: "Dodanie ankiety",
+  VOTE_POLL: "Głos w ankiecie",
+  CREATE_CHAT_GROUP: "Utworzenie grupy czatu",
+  CREATE_CHAT_MESSAGE: "Wiadomość czatu",
+  DELETE_ANNOUNCEMENT: "Usunięcie ogłoszenia",
+};
+
+function activityActionLabel(action) {
+  return activityActionLabels[action] || action || "Akcja";
+}
+
+function getActivityDate() {
+  if (!selectedActivityDate) selectedActivityDate = formatDateInput(new Date());
+  return selectedActivityDate;
+}
+
+function activityCountLabel(count) {
+  if (count === 1) return "1 akcja";
+  if (count > 1 && count < 5) return `${count} akcje`;
+  return `${count} akcji`;
+}
+
+function formatActivityDateLabel(value) {
+  const date = localDateFromInput(value);
+  if (!date) return value || "Wybrany dzień";
+  return new Intl.DateTimeFormat("pl-PL", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatActivityTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const parsed = Date.parse(text.includes("T") ? text : text.replace(" ", "T"));
+  if (Number.isNaN(parsed)) return text;
+  return new Intl.DateTimeFormat("pl-PL", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(parsed));
+}
+
+function formatActivityDetails(details) {
+  const text = String(details || "").trim();
+  if (!text) return "Brak szczegółów";
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.entries(parsed)
+        .map(([key, value]) => `${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`)
+        .join(" · ");
+    }
+  } catch {
+    return text;
+  }
+  return text;
+}
+
+function activityTimestamp(entry) {
+  const text = String(entry?.createdAt || "").trim();
+  const parsed = Date.parse(text.includes("T") ? text : text.replace(" ", "T"));
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function activitySortLabel(entry) {
+  return normalizeSearch(activityActionLabel(entry?.action));
+}
+
+function renderActivityTypeOptions() {
+  const select = $("#activityTypeSelect");
+  if (!select) return;
+  const options = [...new Set(activityEntries.map((entry) => entry.action).filter(Boolean))]
+    .sort((a, b) => activityActionLabel(a).localeCompare(activityActionLabel(b), "pl"));
+  const isAvailable = selectedActivityType === "all" || options.includes(selectedActivityType);
+  if (!isAvailable) selectedActivityType = "all";
+  select.innerHTML = [
+    `<option value="all">Wszystkie typy</option>`,
+    ...options.map((action) => `<option value="${escapeHtml(action)}">${escapeHtml(activityActionLabel(action))}</option>`),
+  ].join("");
+  select.value = selectedActivityType;
+}
+
+function getVisibleActivityEntries() {
+  return activityEntries
+    .filter((entry) => selectedActivityType === "all" || entry.action === selectedActivityType)
+    .sort((entryA, entryB) => {
+      if (selectedActivitySort === "time-asc") return activityTimestamp(entryA) - activityTimestamp(entryB);
+      if (selectedActivitySort === "type") {
+        const labelCompare = activitySortLabel(entryA).localeCompare(activitySortLabel(entryB), "pl");
+        if (labelCompare) return labelCompare;
+      }
+      return activityTimestamp(entryB) - activityTimestamp(entryA);
+    });
+}
+
+function renderActivityLog() {
+  const dateInput = $("#activityDateInput");
+  const selectedDate = getActivityDate();
+  if (dateInput && dateInput.value !== selectedDate) dateInput.value = selectedDate;
+  renderActivityTypeOptions();
+  const sortSelect = $("#activitySortSelect");
+  if (sortSelect && sortSelect.value !== selectedActivitySort) sortSelect.value = selectedActivitySort;
+  const visibleEntries = getVisibleActivityEntries();
+  const dateLabel = $("#activityDateLabel");
+  if (dateLabel) dateLabel.textContent = formatActivityDateLabel(selectedDate);
+  const count = $("#activityCount");
+  if (count) {
+    count.textContent =
+      selectedActivityType === "all"
+        ? activityCountLabel(activityEntries.length)
+        : `${activityCountLabel(visibleEntries.length)} z ${activityEntries.length}`;
+  }
+  const list = $("#activityList");
+  if (!list) return;
+  list.innerHTML = visibleEntries.length
+    ? visibleEntries
+        .map((entry) => {
+          const actionLabel = activityActionLabel(entry.action);
+          return `
+            <article class="activity-item">
+              <time>${escapeHtml(formatActivityTime(entry.createdAt))}</time>
+              <div>
+                <div class="card-line">
+                  <strong>${escapeHtml(actionLabel)}</strong>
+                  <span class="pill">${escapeHtml(entry.actorName || entry.actorLogin || "Użytkownik")}</span>
+                </div>
+                <p class="note">${escapeHtml(formatActivityDetails(entry.details))}</p>
+                <span class="muted">${escapeHtml(entry.action || "")}${entry.actorLogin ? ` · ${escapeHtml(entry.actorLogin)}` : ""}</span>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">${
+        activityEntries.length
+          ? "Brak akcji pasujących do wybranego typu."
+          : "Brak aktywności użytkowników dla wybranego dnia."
+      }</div>`;
+}
+
+async function syncActivityLogFromBackend(options = {}) {
+  if (!backendAvailable || !isLoggedIn() || role !== "admin") return false;
+  try {
+    const date = encodeURIComponent(options.date || getActivityDate());
+    const snapshot = await apiRequest(`/audit?date=${date}`, { headers: {} });
+    selectedActivityDate = snapshot.date || options.date || getActivityDate();
+    activityEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
+    renderActivityLog();
+    return true;
+  } catch (error) {
+    activityEntries = [];
+    renderActivityLog();
+    if (!options.silent) showToast("Historia aktywności", error.message || "Nie udało się pobrać historii.");
+    return false;
+  }
+}
+
 function renderDecisions() {
   const list = $("#decisionList");
   const count = $("#decisionCount");
@@ -3830,6 +4385,7 @@ function normalizeNotification(notification) {
     title,
     body,
     target,
+    category: notification.category || notificationCategory({ title, body, target }),
     persistent,
     unread: persistent || (notification.unread !== false && !notificationReadIds.has(String(id))),
     createdAt: notification.createdAt || Date.now(),
@@ -3909,6 +4465,55 @@ function getVisibleNotifications() {
   return [...byId.values()].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
 }
 
+function notificationCategory(notification) {
+  const target = notification.target || {};
+  const view = target.view || "";
+  if (view === "chat") return "chat";
+  if (view === "tasks") return "tasks";
+  if (view === "reports") return "reports";
+  if (view === "announcements") return "announcements";
+  if (view === "time") return "time";
+  if (view === "calendar") return "calendar";
+  if (view === "knowledge") return "knowledge";
+  if (view === "team") return "team";
+
+  const text = normalizeSearch(`${notification.title || ""} ${notification.body || ""}`);
+  if (text.includes("czat") || text.includes("wiadom")) return "chat";
+  if (text.includes("zadanie") || text.includes("zadania")) return "tasks";
+  if (text.includes("zglosz")) return "reports";
+  if (text.includes("oglosz") || text.includes("komentarz")) return "announcements";
+  if (text.includes("czas") || text.includes("wniosek") || text.includes("korekt") || text.includes("grafik")) return "time";
+  if (text.includes("kalendarz") || text.includes("wydarzenie") || text.includes("rsvp")) return "calendar";
+  if (text.includes("wiedzy") || text.includes("dokument") || text.includes("zeszyt")) return "knowledge";
+  if (text.includes("konto") || text.includes("haslo") || text.includes("zespol")) return "team";
+  return "dashboard";
+}
+
+function notificationFilterLabel(filterId) {
+  return notificationFilters.find((filter) => filter.id === filterId)?.label || "Inne";
+}
+
+function notificationMatchesFilter(notification) {
+  return currentNotificationFilter === "all" || notification.category === currentNotificationFilter;
+}
+
+function renderNotificationFilterOptions(allNotifications) {
+  const select = $("#notificationTypeFilter");
+  if (!select) return;
+  const counts = new Map();
+  allNotifications.forEach((notification) => {
+    counts.set(notification.category, (counts.get(notification.category) || 0) + 1);
+  });
+  if (!notificationFilters.some((filter) => filter.id === currentNotificationFilter)) currentNotificationFilter = "all";
+  select.innerHTML = notificationFilters
+    .map((filter) => {
+      const count = filter.id === "all" ? allNotifications.length : counts.get(filter.id) || 0;
+      return `<option value="${escapeHtml(filter.id)}">${escapeHtml(filter.label)} (${count})</option>`;
+    })
+    .join("");
+  select.value = currentNotificationFilter;
+}
+
 function markNotificationRead(notification) {
   if (!notification) return;
   if (notification.persistent) return;
@@ -3919,13 +4524,13 @@ function markNotificationRead(notification) {
   saveNotificationReadState();
 }
 
-function renderNavNotificationBadges() {
+function renderNavNotificationBadges(sourceNotifications = getVisibleNotifications()) {
   if (!isLoggedIn()) {
     $$(".nav-item .nav-alert").forEach((badge) => badge.remove());
     return;
   }
   const counts = new Map();
-  renderedNotifications
+  sourceNotifications
     .filter((notification) => notification.unread || notification.persistent)
     .forEach((notification) => {
       const view = notification.target?.view;
@@ -3953,28 +4558,37 @@ function renderNavNotificationBadges() {
 }
 
 function renderNotifications() {
-  renderedNotifications = getVisibleNotifications();
-  const unread = renderedNotifications.filter((notification) => notification.unread).length;
+  const allNotifications = getVisibleNotifications();
+  renderNotificationFilterOptions(allNotifications);
+  renderedNotifications = allNotifications.filter(notificationMatchesFilter);
+  const unread = allNotifications.filter((notification) => notification.unread).length;
   $(".bell strong").textContent = unread;
   $(".bell span").classList.toggle("hidden", unread === 0);
   $("#notificationList").innerHTML = renderedNotifications.length
     ? renderedNotifications
     .map(
       (notification, index) => `
-        <button class="notification-card" data-notification-index="${index}" type="button">
+        <article class="notification-card ${notification.unread || notification.persistent ? "unread" : ""}">
           <div class="card-line">
             <strong>${escapeHtml(notification.title)}</strong>
+            <span class="pill teal">${escapeHtml(notificationFilterLabel(notification.category))}</span>
+          </div>
+          <span>${escapeHtml(notification.body)}</span>
+          <div class="notification-actions">
             <span class="pill ${notification.persistent ? "red" : notification.unread ? "red" : "green"}">${
               notification.persistent ? "Wymagane" : notification.unread ? "Nowe" : "Odczytane"
             }</span>
+            <button class="secondary-button" data-notification-index="${index}" type="button">Przejdź do źródła</button>
+            <button class="secondary-button" data-notification-read="${index}" type="button" ${
+              notification.persistent || !notification.unread ? "disabled" : ""
+            }>${notification.persistent ? "Wymagane" : notification.unread ? "Oznacz jako przeczytane" : "Odczytane"}</button>
           </div>
-          <span>${escapeHtml(notification.body)}</span>
-        </button>
+        </article>
       `,
     )
     .join("")
     : `<div class="empty-state">Brak powiadomień.</div>`;
-  renderNavNotificationBadges();
+  renderNavNotificationBadges(allNotifications);
   renderDashboardRecentChats();
 }
 
@@ -4676,7 +5290,9 @@ function applyRole() {
   document.body.dataset.role = role;
   const isAdmin = role === "admin";
   $$(".admin-only, .admin-widget").forEach((node) => node.classList.toggle("hidden", !isAdmin));
-  if (!isAdmin && $("#stats").classList.contains("active-view")) activateView("dashboard");
+  if (!isAdmin && ($("#stats").classList.contains("active-view") || $("#activity").classList.contains("active-view"))) {
+    activateView("dashboard");
+  }
 }
 
 function activateView(viewId) {
@@ -4684,6 +5300,11 @@ function activateView(viewId) {
   $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === viewId));
   $("#viewTitle").textContent = viewTitles[viewId] || "Panel";
   $(".sidebar").classList.remove("open");
+  if (viewId === "dashboard") {
+    ensureFeedBoardStateForActiveUser();
+  } else {
+    freshFeedItemIds.clear();
+  }
   if (["dashboard", "announcements"].includes(viewId) && backendAvailable && isLoggedIn()) {
     syncAnnouncementsFromBackend({ silent: true }).then((changed) => {
       if (changed) renderAnnouncementState();
@@ -4738,6 +5359,12 @@ function activateView(viewId) {
     syncKnowledgeFromBackend({ silent: true }).then((changed) => {
       if (changed) renderKnowledgeState();
     });
+  }
+  if (viewId === "activity") {
+    renderActivityLog();
+    if (backendAvailable && isLoggedIn() && role === "admin") {
+      syncActivityLogFromBackend({ silent: true });
+    }
   }
   if (viewId === "chat") renderChat();
 }
@@ -5431,6 +6058,7 @@ async function boot() {
   renderStats();
   renderChat();
   renderKnowledge();
+  renderActivityLog();
   renderNotifications();
   restoreDashboardLayout();
   bindDashboardDrag();
@@ -5498,6 +6126,19 @@ async function boot() {
     kbSearchQuery = event.target.value;
     renderKnowledge();
   });
+  $("#activityFilterForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    selectedActivityDate = $("#activityDateInput").value || formatDateInput(new Date());
+    await syncActivityLogFromBackend();
+  });
+  $("#activityTypeSelect").addEventListener("change", (event) => {
+    selectedActivityType = event.target.value || "all";
+    renderActivityLog();
+  });
+  $("#activitySortSelect").addEventListener("change", (event) => {
+    selectedActivitySort = event.target.value || "time-desc";
+    renderActivityLog();
+  });
   $("#globalSearchForm").addEventListener("submit", submitGlobalSearch);
   $("#globalSearchInput").addEventListener("input", (event) => {
     if ($("#searchDialog").open) {
@@ -5516,6 +6157,10 @@ async function boot() {
   });
   $("#menuToggle").addEventListener("click", () => $(".sidebar").classList.toggle("open"));
   $("#notificationsButton").addEventListener("click", () => openDialog("#notificationsDialog", { toggle: true }));
+  $("#notificationTypeFilter").addEventListener("change", (event) => {
+    currentNotificationFilter = event.target.value || "all";
+    renderNotifications();
+  });
   $("#markNotificationsButton").addEventListener("click", (event) => {
     event.preventDefault();
     getVisibleNotifications()
@@ -5530,6 +6175,11 @@ async function boot() {
   $("#scheduleEditorForm").addEventListener("submit", saveScheduleEditor);
   $("#scheduleEditorMode").addEventListener("change", updateScheduleEditorMode);
   $("#scheduleClearButton").addEventListener("click", clearScheduleEditor);
+  $("#copyPreviousScheduleButton").addEventListener("click", copyPreviousScheduleWeek);
+  $("#bulkScheduleButton").addEventListener("click", openBulkScheduleForm);
+  $("#bulkScheduleForm").addEventListener("submit", saveBulkScheduleForm);
+  $("#bulkScheduleMode").addEventListener("change", updateBulkScheduleMode);
+  $("#bulkScheduleClearButton").addEventListener("click", clearBulkScheduleForm);
   $("#schedulePrevWeek").addEventListener("click", () => shiftScheduleWeek(-1));
   $("#scheduleNextWeek").addEventListener("click", () => shiftScheduleWeek(1));
   $("#scheduleCurrentWeek").addEventListener("click", () => setScheduleWeek(formatDateInput(getWeekStartDate())));
@@ -5622,6 +6272,14 @@ async function boot() {
       return;
     }
 
+    const notificationReadButton = event.target.closest("[data-notification-read]");
+    if (notificationReadButton) {
+      const notification = renderedNotifications[Number(notificationReadButton.dataset.notificationRead)];
+      markNotificationRead(notification);
+      renderNotifications();
+      return;
+    }
+
     const scheduleEditButton = event.target.closest("[data-schedule-edit]");
     if (scheduleEditButton) {
       openScheduleEditor(scheduleEditButton);
@@ -5631,6 +6289,12 @@ async function boot() {
     const feedSourceButton = event.target.closest("[data-feed-source], [data-feed-item]");
     if (feedSourceButton) {
       await openFeedItemSource(feedSourceButton.dataset.feedSource || feedSourceButton.dataset.feedItem);
+      return;
+    }
+
+    const feedPinButton = event.target.closest("[data-feed-pin]");
+    if (feedPinButton) {
+      toggleFeedItemPin(feedPinButton.dataset.feedPin);
       return;
     }
 
@@ -5816,7 +6480,7 @@ async function boot() {
           createdAt: "teraz",
         });
         if (createdTask) {
-          await updateReportStatus(report.id, "W realizacji");
+          await updateReportStatus(report.id, "Przyjęte");
           showToast("Utworzono zadanie", report.title);
         }
         return;
@@ -5849,10 +6513,17 @@ async function boot() {
         createdAt: "teraz",
       });
       if (createdTask) {
-        await updateReportStatus(report.id, "W realizacji");
+        await updateReportStatus(report.id, "Przyjęte");
         renderKanban();
         showToast("Utworzono zadanie ze zgłoszenia", report.title);
       }
+      return;
+    }
+
+    const reportAcceptButton = event.target.closest("[data-report-accept]");
+    if (reportAcceptButton) {
+      const report = await updateReportStatus(reportAcceptButton.dataset.reportAccept, "Przyjęte");
+      if (report) showToast("Zgłoszenie przyjęte", report.title);
       return;
     }
 
@@ -5865,7 +6536,7 @@ async function boot() {
 
     const reportReopenButton = event.target.closest("[data-report-reopen]");
     if (reportReopenButton) {
-      const report = await updateReportStatus(reportReopenButton.dataset.reportReopen, "W realizacji");
+      const report = await updateReportStatus(reportReopenButton.dataset.reportReopen, "Przyjęte");
       if (report) showToast("Zgłoszenie przywrócone", report.title);
       return;
     }
@@ -5987,6 +6658,11 @@ async function boot() {
     if (!event.target.matches("button")) return;
     $$("[data-feed-filter]").forEach((button) => button.classList.toggle("active", button === event.target));
     renderPosts(event.target.dataset.feedFilter);
+  });
+
+  $("#feedTypeFilter").addEventListener("change", (event) => {
+    currentFeedTypeFilter = event.target.value || "all";
+    renderPosts(currentFeedFilter);
   });
 
   document.addEventListener("keydown", (event) => {
