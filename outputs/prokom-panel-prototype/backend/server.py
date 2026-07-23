@@ -56,6 +56,7 @@ WORK_DAYS = (
 )
 WORK_DAY_KEYS = {key for key, _label in WORK_DAYS}
 WORK_DAY_INDEX = {key: index for index, (key, _label) in enumerate(WORK_DAYS)}
+AUTO_TIME_RECORD_NOTE = "ewidencja_czasu"
 
 SEED_USERS = [
     {
@@ -1500,6 +1501,72 @@ def add_break_seconds(conn: sqlite3.Connection, session: sqlite3.Row, ended_at: 
     )
 
 
+def minutes_label(minutes: int) -> str:
+    safe_minutes = max(0, min(23 * 60 + 59, minutes))
+    return f"{safe_minutes // 60:02d}:{safe_minutes % 60:02d}"
+
+
+def sync_completed_session_to_schedule(
+    conn: sqlite3.Connection,
+    user_login: str,
+    started_at_text: str | None,
+    ended_at_text: str | None,
+) -> dict | None:
+    started = parse_iso(started_at_text)
+    ended = parse_iso(ended_at_text)
+    if not started or not ended or ended <= started:
+        return None
+    local_started = started.astimezone()
+    local_ended = ended.astimezone()
+    day_index = local_started.weekday()
+    if day_index >= len(WORK_DAYS):
+        return None
+    week_start = (local_started.date() - timedelta(days=day_index)).strftime("%Y-%m-%d")
+    day_key = WORK_DAYS[day_index][0]
+    start_minutes = local_started.hour * 60 + local_started.minute
+    if local_ended.date() == local_started.date():
+        end_minutes = local_ended.hour * 60 + local_ended.minute
+    else:
+        end_minutes = 23 * 60 + 59
+    if end_minutes <= start_minutes:
+        end_minutes = min(23 * 60 + 59, start_minutes + 1)
+    if end_minutes <= start_minutes:
+        return None
+
+    existing = conn.execute(
+        """
+        SELECT *
+        FROM work_schedule_weeks
+        WHERE user_login = ? AND week_start = ? AND day_key = ?
+        """,
+        (user_login, week_start, day_key),
+    ).fetchone()
+    if existing and existing["note"] == AUTO_TIME_RECORD_NOTE:
+        existing_start = parse_schedule_minutes(existing["start_time"])
+        existing_end = parse_schedule_minutes(existing["end_time"])
+        if existing_start is not None:
+            start_minutes = min(start_minutes, existing_start)
+        if existing_end is not None:
+            end_minutes = max(end_minutes, existing_end)
+
+    start_time = minutes_label(start_minutes)
+    end_time = minutes_label(end_minutes)
+    conn.execute(
+        """
+        INSERT INTO work_schedule_weeks(user_login, week_start, day_key, start_time, end_time, note, updated_by, updated_at)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_login, week_start, day_key) DO UPDATE SET
+          start_time = excluded.start_time,
+          end_time = excluded.end_time,
+          note = excluded.note,
+          updated_by = excluded.updated_by,
+          updated_at = excluded.updated_at
+        """,
+        (user_login, week_start, day_key, start_time, end_time, AUTO_TIME_RECORD_NOTE, user_login, ended_at_text),
+    )
+    return {"weekStart": week_start, "day": day_key, "value": f"{start_time}-{end_time}"}
+
+
 def schedule_rows_map(conn: sqlite3.Connection, week_start: str | None = None) -> dict[tuple[str, str], sqlite3.Row]:
     if week_start:
         rows = conn.execute(
@@ -2601,6 +2668,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
             started_at = existing["started_at"]
 
         session = open_time_session(conn, user["login"])
+        schedule_sync = None
         if clocked_in:
             session = start_time_session(conn, user["login"], started_at or now)
             if break_active and not session["break_started_at"]:
@@ -2626,6 +2694,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
                         """,
                         (now, now, session["id"]),
                     )
+                    schedule_sync = sync_completed_session_to_schedule(conn, user["login"], session["started_at"], now)
 
         conn.execute(
             """
@@ -2641,7 +2710,16 @@ class ProkomHandler(BaseHTTPRequestHandler):
         )
         conn.execute(
             "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'UPDATE_PRESENCE', ?)",
-            (user["login"], "break" if break_active else "work" if clocked_in else "out"),
+            (
+                user["login"],
+                json.dumps(
+                    {
+                        "state": "break" if break_active else "work" if clocked_in else "out",
+                        "schedule": schedule_sync,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
         )
         self.send_json(snapshot(conn))
 
