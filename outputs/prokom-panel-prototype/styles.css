@@ -3078,6 +3078,181 @@ textarea:focus {
   background: var(--grad);
 }
 
+[data-theme="dark"] #dashboard {
+  --dashboard-card: color-mix(in srgb, var(--surface), #0b1220 28%);
+  --dashboard-card-soft: color-mix(in srgb, var(--surface-soft), #0b1220 24%);
+  --dashboard-border: color-mix(in srgb, var(--border), #9aa8bd 12%);
+  --dashboard-readable-muted: #b8c3d6;
+}
+
+[data-theme="dark"] #dashboard .widget:not(.feature-feed-widget) {
+  border-color: var(--dashboard-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--dashboard-card), #ffffff 2%), var(--dashboard-card));
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.34);
+}
+
+[data-theme="dark"] #dashboard .widget > .widget-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--dashboard-border), transparent 18%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+}
+
+[data-theme="dark"] #dashboard .feature-feed-widget {
+  border-color: color-mix(in srgb, var(--primary), var(--dashboard-border) 54%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface), var(--primary) 5%), color-mix(in srgb, var(--surface), #020617 18%));
+  box-shadow:
+    0 24px 54px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] #dashboard .feature-feed-widget::before {
+  border-color: color-mix(in srgb, var(--primary), transparent 74%);
+}
+
+[data-theme="dark"] #dashboard .feature-feed-widget > .widget-header {
+  border-bottom-color: color-mix(in srgb, var(--primary), var(--dashboard-border) 66%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--primary), transparent 88%), transparent);
+}
+
+[data-theme="dark"] #dashboard .feed-card,
+[data-theme="dark"] #dashboard .kudos-card,
+[data-theme="dark"] #dashboard .poll-option,
+[data-theme="dark"] #dashboard .people-list .person,
+[data-theme="dark"] #dashboard .decision-list button,
+[data-theme="dark"] #dashboard .recent-chat-button,
+[data-theme="dark"] #dashboard .event-list article,
+[data-theme="dark"] #dashboard .empty-state {
+  border-color: var(--dashboard-border);
+  background: color-mix(in srgb, var(--dashboard-card-soft), #ffffff 2%);
+  color: var(--text);
+}
+
+[data-theme="dark"] #dashboard .feed-card {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+[data-theme="dark"] #dashboard .feed-card:hover,
+[data-theme="dark"] #dashboard .kudos-card:hover,
+[data-theme="dark"] #dashboard .poll-option:hover,
+[data-theme="dark"] #dashboard .recent-chat-button:hover {
+  border-color: color-mix(in srgb, var(--primary), var(--dashboard-border) 45%);
+  background: color-mix(in srgb, var(--dashboard-card-soft), var(--primary) 6%);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.32);
+}
+
+[data-theme="dark"] #dashboard .feed-card.attention {
+  border-color: color-mix(in srgb, var(--amber), var(--dashboard-border) 44%);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--amber), transparent 88%), color-mix(in srgb, var(--dashboard-card-soft), #020617 10%));
+}
+
+[data-theme="dark"] #dashboard .feed-card.pinned {
+  border-color: color-mix(in srgb, var(--primary), var(--dashboard-border) 38%);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--primary), transparent 82%), color-mix(in srgb, var(--dashboard-card-soft), #020617 8%) 64%);
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.34),
+    inset 3px 0 0 var(--primary);
+}
+
+[data-theme="dark"] #dashboard .note,
+[data-theme="dark"] #dashboard .kudos,
+[data-theme="dark"] #dashboard .feed-meta,
+[data-theme="dark"] #dashboard .muted,
+[data-theme="dark"] #dashboard .recent-chat-button small,
+[data-theme="dark"] #dashboard .poll-option-row span,
+[data-theme="dark"] #dashboard .timeline li,
+[data-theme="dark"] #dashboard .clock-card > span {
+  color: var(--dashboard-readable-muted);
+}
+
+[data-theme="dark"] #dashboard .feed-card-top > .muted,
+[data-theme="dark"] #dashboard .timeline time,
+[data-theme="dark"] #dashboard .decision-list span {
+  color: color-mix(in srgb, var(--primary), #dbeafe 36%);
+}
+
+[data-theme="dark"] #dashboard .pill {
+  border: 1px solid color-mix(in srgb, var(--dashboard-border), transparent 8%);
+  background: rgba(148, 163, 184, 0.14);
+  color: #dce5f3;
+}
+
+[data-theme="dark"] #dashboard .pill.green {
+  border-color: color-mix(in srgb, var(--green), transparent 58%);
+  background: color-mix(in srgb, var(--green), transparent 84%);
+  color: #8fe3bd;
+}
+
+[data-theme="dark"] #dashboard .pill.amber {
+  border-color: color-mix(in srgb, var(--amber), transparent 54%);
+  background: color-mix(in srgb, var(--amber), transparent 84%);
+  color: #ffd58a;
+}
+
+[data-theme="dark"] #dashboard .pill.red {
+  border-color: color-mix(in srgb, var(--red), transparent 54%);
+  background: color-mix(in srgb, var(--red), transparent 84%);
+  color: #ffb4b7;
+}
+
+[data-theme="dark"] #dashboard .pill.teal {
+  border-color: color-mix(in srgb, var(--primary), transparent 54%);
+  background: color-mix(in srgb, var(--primary), transparent 84%);
+  color: color-mix(in srgb, var(--primary), #ffffff 62%);
+}
+
+[data-theme="dark"] #dashboard .pill.violet {
+  border-color: color-mix(in srgb, var(--violet), transparent 54%);
+  background: color-mix(in srgb, var(--violet), transparent 84%);
+  color: #d8c7ff;
+}
+
+[data-theme="dark"] #dashboard .segmented,
+[data-theme="dark"] #dashboard .feed-type-filter select,
+[data-theme="dark"] #dashboard .poll-meter {
+  border-color: var(--dashboard-border);
+  background: rgba(148, 163, 184, 0.1);
+}
+
+[data-theme="dark"] #dashboard .segmented button {
+  color: var(--dashboard-readable-muted);
+}
+
+[data-theme="dark"] #dashboard .segmented .active {
+  color: #fff;
+}
+
+[data-theme="dark"] #dashboard .feed-type-filter select {
+  color: var(--text);
+}
+
+[data-theme="dark"] #dashboard .poll-option.active,
+[data-theme="dark"] #dashboard .recent-chat-button.unread {
+  border-color: color-mix(in srgb, var(--primary), var(--dashboard-border) 35%);
+  background: color-mix(in srgb, var(--dashboard-card-soft), var(--primary) 11%);
+}
+
+[data-theme="dark"] #dashboard .secondary-button {
+  border-color: var(--dashboard-border);
+  background: color-mix(in srgb, var(--dashboard-card-soft), #ffffff 3%);
+  color: #dbe4f2;
+}
+
+[data-theme="dark"] #dashboard .secondary-button:hover {
+  border-color: color-mix(in srgb, var(--primary), var(--dashboard-border) 45%);
+  background: color-mix(in srgb, var(--dashboard-card-soft), var(--primary) 8%);
+  color: #fff;
+}
+
+[data-theme="dark"] #dashboard .day-strip .eyebrow,
+[data-theme="dark"] #dashboard .day-strip .muted,
+[data-theme="dark"] #dashboard .day-strip .clock-card > span {
+  color: rgba(255, 255, 255, 0.84);
+}
+
 .message.own,
 .message.me {
   background: var(--primary);
@@ -6730,6 +6905,14 @@ textarea:focus {
   align-items: start;
 }
 
+#stats {
+  --stats-accent: var(--primary);
+  --stats-accent-soft: color-mix(in srgb, var(--primary), transparent 86%);
+  --stats-accent-panel: color-mix(in srgb, var(--surface), var(--primary-soft) 20%);
+  --stats-accent-line: color-mix(in srgb, var(--primary), var(--border) 64%);
+  --stats-accent-shadow: color-mix(in srgb, var(--primary), transparent 82%);
+}
+
 #stats .panel,
 #activity .panel {
   padding: 0;
@@ -6771,7 +6954,7 @@ textarea:focus {
 #stats .stats-chart-card {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--stats-accent-line);
   border-radius: var(--radius-sm);
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -6827,19 +7010,19 @@ textarea:focus {
 }
 
 #stats .tone-time {
-  --stats-tone: var(--teal);
+  --stats-tone: var(--stats-accent);
 }
 
 #stats .tone-done {
-  --stats-tone: var(--green);
+  --stats-tone: var(--stats-accent);
 }
 
 #stats .tone-report {
-  --stats-tone: var(--amber);
+  --stats-tone: var(--stats-accent);
 }
 
 #stats .tone-attendance {
-  --stats-tone: #2563eb;
+  --stats-tone: var(--stats-accent);
 }
 
 #stats .stats-chart-card {
@@ -6853,8 +7036,8 @@ textarea:focus {
 #stats .stats-chart-card .panel-header {
   min-height: 58px;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface), var(--surface-soft) 34%), var(--surface));
+  border-bottom: 1px solid var(--stats-accent-line);
+  background: var(--stats-accent-panel);
 }
 
 #stats .stats-chart-card .panel-header h2 {
@@ -6913,7 +7096,8 @@ textarea:focus {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--teal), var(--green));
+  background: var(--stats-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--stats-accent), transparent 82%);
 }
 
 #stats .stats-task-status {
@@ -6932,7 +7116,7 @@ textarea:focus {
   place-items: center;
   justify-self: center;
   border-radius: 999px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border), transparent 20%);
+  box-shadow: inset 0 0 0 1px var(--stats-accent-line);
 }
 
 #stats .stats-donut::after {
@@ -6996,19 +7180,19 @@ textarea:focus {
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  background: var(--teal);
+  background: var(--stats-accent);
 }
 
 #stats .stats-dot.amber {
-  background: var(--amber);
+  background: color-mix(in srgb, var(--stats-accent), var(--surface) 26%);
 }
 
 #stats .stats-dot.green {
-  background: var(--green);
+  background: color-mix(in srgb, var(--stats-accent), var(--text) 16%);
 }
 
 #stats .stats-dot.blue {
-  background: #2563eb;
+  background: color-mix(in srgb, var(--stats-accent), #ffffff 24%);
 }
 
 #stats .stats-activity-chart,
@@ -7019,9 +7203,7 @@ textarea:focus {
   gap: 12px;
   align-items: end;
   padding: 18px 18px 16px;
-  background:
-    linear-gradient(to top, color-mix(in srgb, var(--border), transparent 38%) 1px, transparent 1px) 0 20px / 100% 45px,
-    var(--surface);
+  background: var(--surface);
 }
 
 #stats .stats-trend-chart {
@@ -7045,12 +7227,12 @@ textarea:focus {
   min-height: 6px;
   justify-self: center;
   border-radius: 8px 8px 2px 2px;
-  background: linear-gradient(180deg, var(--teal), color-mix(in srgb, var(--teal), var(--green) 44%));
-  box-shadow: 0 10px 22px color-mix(in srgb, var(--teal), transparent 78%);
+  background: var(--stats-accent);
+  box-shadow: 0 10px 22px var(--stats-accent-shadow);
 }
 
 #stats .stats-trend-point span {
-  background: linear-gradient(180deg, #2563eb, var(--teal));
+  background: color-mix(in srgb, var(--stats-accent), #ffffff 18%);
 }
 
 #stats .stats-activity-bar strong,
@@ -7132,7 +7314,7 @@ textarea:focus {
 
 #stats .issue-list button:hover {
   transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--teal), var(--border) 40%);
+  border-color: color-mix(in srgb, var(--stats-accent), var(--border) 40%);
   box-shadow: var(--shadow);
 }
 

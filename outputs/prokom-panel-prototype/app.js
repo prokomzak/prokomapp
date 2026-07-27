@@ -5049,10 +5049,10 @@ function renderStats() {
     : `<div class="empty-state">Brak danych czasu pracy.</div>`;
 
   const donutSegments = [
-    { label: "Do zrobienia", value: taskCounts.todo, color: "var(--amber)", className: "amber" },
-    { label: "W trakcie", value: taskCounts.doing, color: "var(--teal)", className: "teal" },
-    { label: "Do sprawdzenia", value: taskCounts.review, color: "#2563eb", className: "blue" },
-    { label: "Zrobione", value: taskCounts.done, color: "var(--green)", className: "green" },
+    { label: "Do zrobienia", value: taskCounts.todo, color: "var(--primary)", className: "amber" },
+    { label: "W trakcie", value: taskCounts.doing, color: "color-mix(in srgb, var(--primary), var(--surface) 18%)", className: "teal" },
+    { label: "Do sprawdzenia", value: taskCounts.review, color: "color-mix(in srgb, var(--primary), #ffffff 26%)", className: "blue" },
+    { label: "Zrobione", value: taskCounts.done, color: "color-mix(in srgb, var(--primary), var(--text) 14%)", className: "green" },
   ];
   let segmentOffset = 0;
   const conicParts = donutSegments.map((segment) => {
