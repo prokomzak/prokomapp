@@ -74,6 +74,8 @@ let selectedScheduleWeekStart = "";
 let activeScheduleEdit = null;
 let wageRates = {};
 let selectedWageLogin = "";
+let userPreferences = { theme: "light", accent: "indigo" };
+let userPreferencesSaveSeq = 0;
 
 const columnLabels = {
   todo: "Do zrobienia",
@@ -147,6 +149,33 @@ const storageKeys = {
   wageRates: "prokom-wage-rates-v1",
   feedPinnedIds: "prokom-feed-pinned-ids-v1",
   feedSeenIds: "prokom-feed-seen-ids-v1",
+  userPreferences: "prokom-user-preferences-v1",
+};
+
+const defaultNotificationPreferences = {
+  chat: true,
+  tasks: true,
+  inventory: true,
+  reports: true,
+  announcements: true,
+  time: true,
+  calendar: true,
+  knowledge: true,
+  team: true,
+  dashboard: true,
+};
+
+const defaultUserPreferences = {
+  theme: "light",
+  accent: "indigo",
+  notifications: { ...defaultNotificationPreferences },
+};
+
+const accentOptions = {
+  indigo: { label: "Granatowy", themeColor: "#4f46e5" },
+  blue: { label: "Niebieski", themeColor: "#2563eb" },
+  green: { label: "Zielony", themeColor: "#0f9f6e" },
+  red: { label: "Czerwony", themeColor: "#dc2626" },
 };
 
 const viewTitles = {
@@ -161,6 +190,7 @@ const viewTitles = {
   team: "Zespół",
   stats: "Statystyki",
   activity: "Historia aktywności",
+  settings: "Ustawienia",
 };
 
 const notificationFilters = [
@@ -176,6 +206,17 @@ const notificationFilters = [
   { id: "dashboard", label: "Inne" },
 ];
 
+const notificationSourceOptions = [
+  { id: "chat", label: "Wiadomości czatu" },
+  { id: "tasks", label: "Nowe zadania" },
+  { id: "inventory", label: "Niskie stany magazynu" },
+  { id: "reports", label: "Zgłoszenia" },
+  { id: "announcements", label: "Ogłoszenia" },
+  { id: "time", label: "Czas pracy" },
+  { id: "calendar", label: "Kalendarz" },
+  { id: "knowledge", label: "Baza wiedzy" },
+];
+
 const feedTypeFilters = [
   { id: "all", label: "Wszystkie typy" },
   { id: "announcements", label: "Ogłoszenia" },
@@ -186,6 +227,18 @@ const feedTypeFilters = [
   { id: "knowledge", label: "Baza wiedzy" },
   { id: "handover", label: "Zeszyt zmiany" },
 ];
+
+const calendarSources = [
+  { id: "calendar", label: "Wydarzenia", className: "source-calendar" },
+  { id: "announcements", label: "Ogłoszenia", className: "source-announcements" },
+  { id: "reports", label: "Zgłoszenia", className: "source-reports" },
+  { id: "tasks", label: "Zadania", className: "source-tasks" },
+  { id: "knowledge", label: "Baza wiedzy", className: "source-knowledge" },
+  { id: "time", label: "Czas pracy", className: "source-time" },
+];
+const calendarSourceMap = Object.fromEntries(calendarSources.map((source) => [source.id, source]));
+const hiddenCalendarSourceIds = new Set();
+let activeCalendarDay = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -235,6 +288,143 @@ function writeStorage(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     showToast("Nie zapisano zmian", "Przeglądarka zablokowała localStorage.");
+  }
+}
+
+function normalizeUserPreferences(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const theme = source.theme === "dark" ? "dark" : "light";
+  const accent = Object.prototype.hasOwnProperty.call(accentOptions, source.accent) ? source.accent : defaultUserPreferences.accent;
+  const sourceNotifications =
+    source.notifications && typeof source.notifications === "object" ? source.notifications : {};
+  const notifications = Object.fromEntries(
+    Object.entries(defaultNotificationPreferences).map(([key, fallback]) => [
+      key,
+      Object.prototype.hasOwnProperty.call(sourceNotifications, key) ? Boolean(sourceNotifications[key]) : fallback,
+    ]),
+  );
+  return { theme, accent, notifications };
+}
+
+function userPreferenceStorageKey(login = getActiveLogin()) {
+  return normalizeLogin(login || "guest") || "guest";
+}
+
+function readLocalUserPreferences(login = getActiveLogin()) {
+  const stored = readStorage(storageKeys.userPreferences, {});
+  const key = userPreferenceStorageKey(login);
+  return normalizeUserPreferences(stored && typeof stored === "object" ? stored[key] : null);
+}
+
+function writeLocalUserPreferences(login = getActiveLogin(), preferences = userPreferences) {
+  const stored = readStorage(storageKeys.userPreferences, {});
+  const next = stored && typeof stored === "object" ? stored : {};
+  next[userPreferenceStorageKey(login)] = normalizeUserPreferences(preferences);
+  writeStorage(storageKeys.userPreferences, next);
+}
+
+function updateThemeMeta(preferences = userPreferences) {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  meta.content = preferences.theme === "dark" ? "#080d18" : accentOptions[preferences.accent]?.themeColor || "#4f46e5";
+}
+
+function updateCurrentAccountPreferences(preferences = userPreferences) {
+  if (!currentUser) return;
+  currentUser = { ...currentUser, preferences: normalizeUserPreferences(preferences) };
+  const index = accounts.findIndex((account) => account.login === currentUser.login);
+  if (index >= 0) {
+    accounts[index] = { ...accounts[index], preferences: currentUser.preferences };
+  }
+}
+
+function setSettingsStatus(label = "Gotowe", tone = "green") {
+  const status = $("#settingsSaveStatus");
+  if (!status) return;
+  status.textContent = label;
+  status.className = `pill ${tone}`.trim();
+}
+
+function applyUserPreferences(preferences = userPreferences) {
+  userPreferences = normalizeUserPreferences(preferences);
+  document.documentElement.dataset.theme = userPreferences.theme;
+  document.documentElement.dataset.accent = userPreferences.accent;
+  updateThemeMeta(userPreferences);
+  const toggle = $("#themeToggle");
+  if (toggle) {
+    toggle.textContent = userPreferences.theme === "dark" ? "Tryb jasny" : "Tryb ciemny";
+  }
+  renderSettings();
+}
+
+function renderSettings() {
+  const themeBadge = $("#settingsThemeBadge");
+  const accentBadge = $("#settingsAccentBadge");
+  const userBadge = $("#settingsUserBadge");
+  const notificationsBadge = $("#settingsNotificationsBadge");
+  if (themeBadge) {
+    themeBadge.textContent = userPreferences.theme === "dark" ? "Ciemny" : "Jasny";
+    themeBadge.className = `pill ${userPreferences.theme === "dark" ? "teal" : ""}`.trim();
+  }
+  if (accentBadge) {
+    accentBadge.textContent = accentOptions[userPreferences.accent]?.label || "Granatowy";
+    accentBadge.className = "pill teal";
+  }
+  if (userBadge) userBadge.textContent = currentUser?.label || "Moje konto";
+  $$("[data-settings-theme]").forEach((input) => {
+    input.checked = input.value === userPreferences.theme;
+  });
+  $$("[data-settings-accent]").forEach((input) => {
+    input.checked = input.value === userPreferences.accent;
+  });
+  $$("[data-settings-notification]").forEach((input) => {
+    input.checked = notificationSourceEnabled(input.value);
+  });
+  if (notificationsBadge) {
+    const enabledCount = notificationSourceOptions.filter((source) => notificationSourceEnabled(source.id)).length;
+    notificationsBadge.textContent =
+      enabledCount === notificationSourceOptions.length ? "Wszystkie" : `${enabledCount} z ${notificationSourceOptions.length}`;
+    notificationsBadge.className = `pill ${enabledCount ? "teal" : "amber"}`;
+  }
+}
+
+async function saveUserPreferences(partial = {}) {
+  const saveSeq = ++userPreferencesSaveSeq;
+  const next = normalizeUserPreferences({
+    ...userPreferences,
+    ...partial,
+    notifications: {
+      ...(userPreferences.notifications || {}),
+      ...(partial.notifications || {}),
+    },
+  });
+  applyUserPreferences(next);
+  if (currentUser) {
+    updateCurrentAccountPreferences(next);
+    writeLocalUserPreferences(currentUser.login, next);
+  }
+  setSettingsStatus("Zapisywanie", "teal");
+
+  if (!backendAvailable || !currentUser) {
+    setSettingsStatus("Zapisano", "green");
+    return;
+  }
+
+  try {
+    const result = await apiRequest("/me/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(next),
+    });
+    const saved = normalizeUserPreferences(result.preferences || result.user?.preferences || next);
+    if (saveSeq !== userPreferencesSaveSeq) return;
+    applyUserPreferences(saved);
+    updateCurrentAccountPreferences(saved);
+    writeLocalUserPreferences(currentUser.login, saved);
+    setSettingsStatus("Zapisano", "green");
+  } catch (error) {
+    if (saveSeq !== userPreferencesSaveSeq) return;
+    setSettingsStatus("Zapis lokalny", "amber");
+    showToast("Ustawienia zapisane lokalnie", error.message || "Backend nie przyjął zmian.");
   }
 }
 
@@ -380,6 +570,205 @@ function scheduleCellClass(value = "") {
   return parsed.mode === "work" ? "work" : "note";
 }
 
+function scheduleValueSeconds(value = "") {
+  const parsed = parseScheduleValue(value);
+  if (parsed.mode !== "work" || !parsed.start || !parsed.end) return 0;
+  const start = timeToMinutes(parsed.start);
+  const end = timeToMinutes(parsed.end);
+  return start !== null && end !== null && end > start ? (end - start) * 60 : 0;
+}
+
+function currentWorkdayIndex() {
+  const index = (new Date().getDay() + 6) % 7;
+  return index >= 0 && index < scheduleDayKeys.length ? index : -1;
+}
+
+function effectiveTodaySeconds() {
+  const personal = timeSummary?.personal || {};
+  return Math.max(Number(personal.todaySeconds || 0), Math.floor(currentElapsed() / 1000));
+}
+
+function activeScheduleRow() {
+  const rows = timeSummary?.schedule?.rows || [];
+  return rows.find((row) => normalizeLogin(row.login) === getActiveLogin()) || null;
+}
+
+function weeklyPresenceSeries() {
+  const personal = timeSummary?.personal || {};
+  const days = getRenderedScheduleDays();
+  const row = activeScheduleRow();
+  const todayIndex = currentWorkdayIndex();
+  const isCurrentWeek = getScheduleWeekStart() === getCurrentWeekStartValue();
+  return days.map((day, index) => {
+    const cell = row?.cells?.find((item) => item.day === day.key);
+    const scheduleSeconds = scheduleValueSeconds(cell?.value || "");
+    const seconds = isCurrentWeek && index === todayIndex ? Math.max(scheduleSeconds, effectiveTodaySeconds()) : scheduleSeconds;
+    return {
+      key: day.key,
+      label: day.label,
+      date: day.date || formatScheduleDate(day.isoDate),
+      seconds,
+      value: cell?.value || "",
+      selected: isCurrentWeek && index === todayIndex,
+      monthSeconds: Number(personal.monthSeconds || 0),
+    };
+  });
+}
+
+function renderTimeKpiTiles() {
+  const personal = timeSummary?.personal || {};
+  const pulse = timeSummary?.pulse || {};
+  const todaySeconds = effectiveTodaySeconds();
+  const weekSeconds = Math.max(Number(personal.weekSeconds || 0), todaySeconds);
+  const monthSeconds = Math.max(Number(personal.monthSeconds || 0), todaySeconds);
+  const overtimeSeconds = Number(pulse.overtimeWeekSeconds || 0);
+  const values = {
+    timeTodayTile: todaySeconds,
+    timeWeekTile: weekSeconds,
+    timeMonthTile: monthSeconds,
+    timeOvertimeTile: overtimeSeconds,
+  };
+  Object.entries(values).forEach(([id, seconds]) => {
+    const node = $(`#${id}`);
+    if (node) node.textContent = formatWorkDuration(seconds);
+  });
+}
+
+function renderTopbarWorkCounter() {
+  const timer = $("#topbarWorkTimer");
+  if (!timer) return;
+  const todaySeconds = effectiveTodaySeconds();
+  timer.textContent = formatTimer(todaySeconds * 1000);
+  const counter = $("#topbarWorkCounter");
+  if (counter) {
+    counter.dataset.clockState = clockedIn ? (breakActive ? "break" : "in") : todaySeconds ? "done" : "out";
+  }
+}
+
+function renderTimeWeekChart() {
+  const chart = $("#timeWeekChart");
+  if (!chart) return;
+  const series = weeklyPresenceSeries();
+  const maxHours = Math.max(10, Math.ceil(Math.max(1, ...series.map((item) => item.seconds)) / 3600));
+  const axisTicks = Array.from({ length: 6 }, (_, index) => maxHours - (maxHours / 5) * index);
+  const shortWeekLabels = ["Pn", "Wt", "\u015ar", "Cz", "Pt"];
+  const formatAxisHour = (value) => `${Number.isInteger(value) ? value : value.toFixed(1).replace(".0", "")}h`;
+  const totalSeconds = series.reduce((sum, item) => sum + item.seconds, 0);
+  const total = $("#timeWeekChartTotal");
+  if (total) total.textContent = formatWorkDuration(totalSeconds);
+  chart.innerHTML = `
+    <div class="time-week-chart-frame" role="img" aria-label="Wykres godzin obecności w tygodniu">
+      <div class="time-week-yaxis">
+        ${axisTicks.map((tick) => `<span>${escapeHtml(formatAxisHour(tick))}</span>`).join("")}
+      </div>
+      <div class="time-week-plot">
+        ${axisTicks
+          .map((_, index) => `<span class="time-week-grid-line" style="--line-y: ${(index / (axisTicks.length - 1)) * 100}%"></span>`)
+          .join("")}
+        <div class="time-week-bars">
+          ${series
+            .map((item) => {
+              const hours = item.seconds / 3600;
+              const percent = item.seconds ? Math.max(3, Math.min(100, Math.round((hours / maxHours) * 100))) : 0;
+              const label = `${item.label} ${item.date || ""}`.trim();
+              return `
+                <article class="time-week-bar ${item.selected ? "is-today" : ""}" style="--bar-height: ${percent}%; --bar-width: ${percent}%" title="${escapeHtml(
+                  `${label}: ${formatWorkDuration(item.seconds)}`,
+                )}">
+                  <span></span>
+                  <strong>${escapeHtml(formatWorkDuration(item.seconds))}</strong>
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    </div>
+    <div class="time-week-xaxis">
+      <span></span>
+      <div class="time-week-labels">
+        ${series
+          .map((item, index) => `<span>${escapeHtml(shortWeekLabels[index] || item.label)}</span>`)
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function todayScheduleCell() {
+  const index = currentWorkdayIndex();
+  if (index < 0) return null;
+  const day = getRenderedScheduleDays()[index];
+  const row = activeScheduleRow();
+  const cell = row?.cells?.find((item) => item.day === day?.key);
+  return day ? { day, value: cell?.value || "" } : null;
+}
+
+function renderTimeDayLog() {
+  const list = $("#timeDayLog");
+  if (!list) return;
+  const personal = timeSummary?.personal || {};
+  const entries = Array.isArray(personal.dayLog) ? personal.dayLog : [];
+  const person = getPersonByLogin(getActiveLogin()) || {};
+  const scheduleCell = todayScheduleCell();
+  const todaySeconds = effectiveTodaySeconds();
+  const badge = $("#timeDayLogBadge");
+  if (badge) {
+    badge.textContent = person.status || "Dzisiaj";
+    badge.className = `pill ${["work", "break"].includes(person.state) ? "green" : todaySeconds ? "teal" : ""}`;
+  }
+
+  if (entries.length) {
+    list.innerHTML = entries
+      .map(
+        (entry) => `
+          <article class="time-log-entry">
+            <time>${escapeHtml(entry.start || "--:--")}${entry.end ? ` - ${escapeHtml(entry.end)}` : ""}</time>
+            <div>
+              <strong>${escapeHtml(entry.status || "Obecność")}</strong>
+              <span>${escapeHtml(formatWorkDuration(entry.durationSeconds || 0))}${
+                entry.breakSeconds ? ` · przerwa ${escapeHtml(formatWorkDuration(entry.breakSeconds))}` : ""
+              }</span>
+            </div>
+          </article>
+        `,
+      )
+      .join("");
+    return;
+  }
+
+  const fallback = [];
+  if (scheduleCell?.value) {
+    fallback.push({
+      time: scheduleCell.day.date || "Dzisiaj",
+      title: "Wpis z grafiku",
+      detail: `${scheduleDisplayValue(scheduleCell.value)} · ${formatWorkDuration(scheduleValueSeconds(scheduleCell.value))}`,
+    });
+  }
+  if (todaySeconds) {
+    fallback.push({
+      time: "Dzisiaj",
+      title: ["work", "break"].includes(person.state) ? person.status : "Zarejestrowana obecność",
+      detail: formatWorkDuration(todaySeconds),
+    });
+  }
+  list.innerHTML = fallback.length
+    ? fallback
+        .map(
+          (entry) => `
+            <article class="time-log-entry">
+              <time>${escapeHtml(entry.time)}</time>
+              <div>
+                <strong>${escapeHtml(entry.title)}</strong>
+                <span>${escapeHtml(entry.detail)}</span>
+              </div>
+            </article>
+          `,
+        )
+        .join("")
+    : `<div class="empty-state">Brak zarejestrowanej obecności dla dzisiejszego dnia.</div>`;
+}
+
 async function apiRequest(path, options = {}) {
   const response = await fetch(`/api${path}`, {
     credentials: "include",
@@ -427,6 +816,7 @@ function normalizeApiAccount(account) {
     canManageUsers: Boolean(account.canManageUsers),
     canManageSchema: Boolean(account.canManageSchema),
     allowRawSql: Boolean(account.allowRawSql),
+    preferences: normalizeUserPreferences(account.preferences),
   };
 }
 
@@ -771,6 +1161,7 @@ function applyTimeSummary(snapshot) {
   renderTimeDashboard();
   renderSchedule();
   renderWageCalculator();
+  renderStats();
   return true;
 }
 
@@ -792,9 +1183,13 @@ function renderTimeDashboard() {
   const today = $("#timeTodayStat");
   const week = $("#timeWeekStat");
   const month = $("#timeMonthStat");
-  if (today) today.textContent = formatWorkDuration(personal.todaySeconds);
+  if (today) today.textContent = formatWorkDuration(effectiveTodaySeconds());
   if (week) week.textContent = formatWorkDuration(personal.weekSeconds);
   if (month) month.textContent = formatWorkDuration(personal.monthSeconds);
+  renderTopbarWorkCounter();
+  renderTimeKpiTiles();
+  renderTimeWeekChart();
+  renderTimeDayLog();
 
   const working = $("#timeWorkingCount");
   const breakCount = $("#timeBreakCount");
@@ -898,6 +1293,7 @@ function applyAnnouncementSnapshot(snapshot) {
 
 function renderAnnouncementState() {
   renderPosts(currentFeedFilter);
+  renderStats();
   if (activePostId && $("#postDialog")?.open) {
     const post = getPostById(activePostId);
     if (post) renderPostDialog(post);
@@ -1014,6 +1410,7 @@ function taskSignature(value = tasks) {
 function renderTaskState() {
   renderKanban();
   renderPosts(currentFeedFilter);
+  renderStats();
   if (activeTaskId && $("#taskDialog")?.open) {
     const ref = getTaskRef(activeTaskId);
     if (ref) openTaskDetails(activeTaskId);
@@ -1173,6 +1570,7 @@ function applyRequestSnapshot(snapshot) {
 function renderRequestState() {
   renderRequests();
   renderPosts(currentFeedFilter);
+  renderStats();
   applyRole();
 }
 
@@ -1254,6 +1652,7 @@ function getReportById(reportId) {
 function renderReportState() {
   renderReports();
   renderPosts(currentFeedFilter);
+  renderStats();
   applyRole();
 }
 
@@ -1344,6 +1743,7 @@ function calendarSignature(value = calendarEvents) {
 function renderCalendarState() {
   renderCalendar();
   renderPosts(currentFeedFilter);
+  renderStats();
 }
 
 async function syncCalendarFromBackend(options = {}) {
@@ -1465,6 +1865,7 @@ function knowledgeSignature() {
 function renderKnowledgeState() {
   renderKnowledge();
   renderPosts(currentFeedFilter);
+  renderStats();
 }
 
 async function syncKnowledgeFromBackend(options = {}) {
@@ -2169,10 +2570,12 @@ function refreshUserScopedUi() {
   renderRequests();
   renderReports();
   renderStats();
+  renderTimeDashboard();
   renderCalendar();
   renderChat();
   renderKnowledge();
   renderWageCalculator();
+  renderSettings();
   renderNotifications();
 }
 
@@ -2219,6 +2622,7 @@ async function signIn(login, password = "") {
       });
       currentUser = normalizeApiAccount(result.user);
       role = currentUser.role;
+      applyUserPreferences(currentUser.preferences || readLocalUserPreferences(currentUser.login));
       localStorage.setItem("prokom-user", JSON.stringify({ login: currentUser.login, backend: true }));
       await syncAccountsFromBackend(currentUser.login, { silent: true });
       await syncTimeSummaryFromBackend({ silent: true });
@@ -2267,6 +2671,7 @@ async function signIn(login, password = "") {
   }
   currentUser = { ...account };
   role = account.role;
+  applyUserPreferences(readLocalUserPreferences(account.login));
   localStorage.setItem(
     "prokom-user",
     JSON.stringify({ login: account.login, passwordVerified: Boolean(account.password) }),
@@ -2301,6 +2706,7 @@ function signOut() {
   seenFeedItemIds.clear();
   freshFeedItemIds.clear();
   currentUser = null;
+  applyUserPreferences(defaultUserPreferences);
   localStorage.removeItem("prokom-user");
   renderAccountOptions("tadeusz");
   $("#passwordInput").value = "";
@@ -2314,6 +2720,7 @@ async function restoreSession() {
       const result = await apiRequest("/me");
       currentUser = normalizeApiAccount(result.user);
       role = currentUser.role;
+      applyUserPreferences(currentUser.preferences || readLocalUserPreferences(currentUser.login));
       localStorage.setItem("prokom-user", JSON.stringify({ login: currentUser.login, backend: true }));
       await syncAccountsFromBackend(currentUser.login, { silent: true });
       await syncTimeSummaryFromBackend({ silent: true });
@@ -2365,6 +2772,7 @@ async function restoreSession() {
   }
   currentUser = { ...account };
   role = account.role;
+  applyUserPreferences(readLocalUserPreferences(account.login));
   refreshUserScopedUi();
 }
 
@@ -2385,6 +2793,10 @@ function renderTimer() {
   const value = formatTimer(currentElapsed());
   $("#liveTimer").textContent = value;
   $("#timeHeroTimer").textContent = value;
+  renderTopbarWorkCounter();
+  renderTimeKpiTiles();
+  renderTimeWeekChart();
+  renderTimeDayLog();
 }
 
 function updateClockControls() {
@@ -2878,6 +3290,21 @@ function priorityLabel(priority) {
   return labels[priority] || labels.normal;
 }
 
+function postPriorityClass(priority) {
+  if (priority === "urgent") return "is-urgent";
+  if (priority === "important") return "is-important";
+  return "is-normal";
+}
+
+function postReadClass(post) {
+  return post.unread ? "is-unread" : "is-read";
+}
+
+function postAuthorInitials(post) {
+  const person = getPersonByLogin(post.authorLogin);
+  return person?.initials || makeInitials(post.author);
+}
+
 function ensurePostSocial(post) {
   post.readers ||= [];
   post.reactions ||= {};
@@ -3339,6 +3766,8 @@ function renderPosts(filter = "all") {
     : `<div class="empty-state">Brak aktywności pasującej do wybranego filtra.</div>`;
   scheduleFeedItemsSeen(feedItems, allFeedItems);
   renderUrgentStrip();
+  const composerAvatar = $("#announcementComposerAvatar");
+  if (composerAvatar) composerAvatar.textContent = makeInitials(getActiveName());
 
   const announcementPosts = posts.filter((post) => {
     if (currentAnnouncementFilter === "urgent") return post.priority === "urgent";
@@ -3352,10 +3781,15 @@ function renderPosts(filter = "all") {
       const [label, color] = priorityLabel(post.priority);
       const attachmentHtml = renderPostAttachment(post);
       return `
-        <article class="announcement-card">
+        <article class="announcement-card announcement-item ${postPriorityClass(post.priority)} ${postReadClass(post)}" data-author-initials="${escapeHtml(
+          postAuthorInitials(post),
+        )}" data-announcement-time="${escapeHtml(activityTimeLabel(post.createdAt, post.unread ? "nieodczytane" : "ogłoszenie"))}">
           <div class="widget-header">
             <strong>${escapeHtml(post.title)}</strong>
-            <span class="pill ${color}">${label}</span>
+            <span class="announcement-card-meta">
+              <span class="pill ${color}">${label}</span>
+              <time>${escapeHtml(activityTimeLabel(post.createdAt, post.unread ? "nieodczytane" : "ogłoszenie"))}</time>
+            </span>
           </div>
           <p class="note">${escapeHtml(post.body)}</p>
           ${attachmentHtml}
@@ -3975,6 +4409,8 @@ async function copyPreviousScheduleWeek() {
 async function setScheduleWeek(weekStart) {
   selectedScheduleWeekStart = formatDateInput(getWeekStartDate(localDateFromInput(weekStart) || getWeekStartDate()));
   renderSchedule();
+  renderTimeWeekChart();
+  renderTimeDayLog();
   if (backendAvailable && isLoggedIn()) {
     await syncTimeSummaryFromBackend({ silent: true, weekStart: selectedScheduleWeekStart });
   }
@@ -3984,46 +4420,382 @@ async function shiftScheduleWeek(weekDelta) {
   await setScheduleWeek(addWeeksToDateInput(getScheduleWeekStart(), weekDelta));
 }
 
+function visibleCalendarDate() {
+  return new Date();
+}
+
+function normalizeCalendarDayValue(day) {
+  const numericDay = Number(day);
+  if (!Number.isInteger(numericDay) || numericDay < 1 || numericDay > 31) return null;
+  return numericDay;
+}
+
+function calendarDayFromDateObject(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const visible = visibleCalendarDate();
+  if (date.getFullYear() !== visible.getFullYear() || date.getMonth() !== visible.getMonth()) return null;
+  return normalizeCalendarDayValue(date.getDate());
+}
+
+function calendarDayFromText(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const normalized = normalizeSearch(text);
+  const today = visibleCalendarDate();
+  if (["dzis", "dzisiaj"].includes(normalized)) return normalizeCalendarDayValue(today.getDate());
+  if (normalized.includes("jutro")) return calendarDayFromDateObject(addDays(today, 1));
+
+  const weekdayIndex = {
+    pn: 0,
+    pon: 0,
+    poniedzialek: 0,
+    wt: 1,
+    wto: 1,
+    wtorek: 1,
+    sr: 2,
+    sro: 2,
+    sroda: 2,
+    czw: 3,
+    czwartek: 3,
+    pt: 4,
+    pia: 4,
+    piatek: 4,
+    sob: 5,
+    sobota: 5,
+    nd: 6,
+    niedziela: 6,
+  };
+  const weekdayKey = Object.keys(weekdayIndex).find((key) => normalized === key || normalized.startsWith(`${key} `));
+  if (weekdayKey) return calendarDayFromDateObject(addDays(getWeekStartDate(today), weekdayIndex[weekdayKey]));
+
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  if (isoMatch) {
+    return calendarDayFromDateObject(new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3])));
+  }
+
+  const shortDateMatch = /(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?/.exec(text);
+  if (shortDateMatch) {
+    const visible = visibleCalendarDate();
+    const yearPart = shortDateMatch[3];
+    const year = yearPart ? Number(yearPart.length === 2 ? `20${yearPart}` : yearPart) : visible.getFullYear();
+    return calendarDayFromDateObject(new Date(year, Number(shortDateMatch[2]) - 1, Number(shortDateMatch[1])));
+  }
+
+  const parsed = Date.parse(text.includes("T") ? text : text.replace(" ", "T"));
+  return Number.isNaN(parsed) ? null : calendarDayFromDateObject(new Date(parsed));
+}
+
+function calendarDateLabelForDay(day) {
+  const visible = visibleCalendarDate();
+  return new Intl.DateTimeFormat("pl-PL", { day: "2-digit", month: "2-digit" }).format(
+    new Date(visible.getFullYear(), visible.getMonth(), day),
+  );
+}
+
+function calendarTimeSortValue(time) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(time || ""));
+  if (!match) return 24 * 60;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function compactCalendarBody(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.length > 92 ? `${text.slice(0, 89)}...` : text;
+}
+
+function makeUnifiedCalendarItem(item) {
+  const day =
+    normalizeCalendarDayValue(item.day) ||
+    calendarDayFromText(item.date) ||
+    calendarDayFromText(item.due) ||
+    calendarDayFromText(item.createdAt) ||
+    normalizeCalendarDayValue(visibleCalendarDate().getDate());
+  if (!day) return null;
+  const source = calendarSourceMap[item.source] || calendarSourceMap.calendar;
+  const time = item.time || "";
+  return {
+    id: item.id,
+    sourceId: source.id,
+    sourceLabel: source.label,
+    sourceClass: source.className,
+    nativeEventId: item.nativeEventId || "",
+    feedId: item.feedId || "",
+    day,
+    dateLabel: item.dateLabel || calendarDateLabelForDay(day),
+    time,
+    title: item.title || source.label,
+    body: compactCalendarBody(item.body),
+    meta: item.meta || "",
+    rsvp: item.rsvp || "",
+    attendees: Number(item.attendees || 0),
+    sortValue: day * 2000 + calendarTimeSortValue(time),
+  };
+}
+
+function getUnifiedCalendarItems() {
+  const taskItems = Object.entries(tasks).flatMap(([column, items]) =>
+    (items || []).map((task) => ({ ...task, column })),
+  );
+  return [
+    ...calendarEvents.map((event) =>
+      makeUnifiedCalendarItem({
+        source: "calendar",
+        id: `calendar:${event.id}`,
+        nativeEventId: event.id,
+        feedId: `calendar:${event.id}`,
+        day: event.day,
+        date: event.date,
+        dateLabel: event.date,
+        time: event.time,
+        title: event.title,
+        body: `${event.attendees || 0} potwierdzeń · ${event.rsvp || "RSVP"}`,
+        meta: event.rsvp || "RSVP",
+        rsvp: event.rsvp,
+        attendees: event.attendees,
+        createdAt: event.createdAt,
+      }),
+    ),
+    ...posts.map((post) =>
+      makeUnifiedCalendarItem({
+        source: "announcements",
+        id: `post:${post.id}`,
+        feedId: `post:${post.id}`,
+        date: post.createdAt,
+        title: post.title,
+        body: post.body,
+        meta: post.priority === "urgent" ? "Pilne ogłoszenie" : "Ogłoszenie",
+        createdAt: post.createdAt,
+      }),
+    ),
+    ...reports.map((report) =>
+      makeUnifiedCalendarItem({
+        source: "reports",
+        id: `report:${report.id}`,
+        feedId: `report:${report.id}`,
+        date: report.updatedAt || report.createdAt,
+        title: report.title,
+        body: report.detail,
+        meta: `${report.category} · ${report.status}`,
+        createdAt: report.updatedAt || report.createdAt,
+      }),
+    ),
+    ...taskItems.map((task) =>
+      makeUnifiedCalendarItem({
+        source: "tasks",
+        id: `task:${task.id}`,
+        feedId: `task:${task.id}`,
+        due: task.due,
+        date: task.due,
+        title: task.title,
+        body: task.description,
+        meta: `${columnLabels[task.column] || "Zadania"} · ${task.owner} · termin: ${task.due}`,
+        createdAt: task.createdAt,
+      }),
+    ),
+    ...kbArticles.map((article) =>
+      makeUnifiedCalendarItem({
+        source: "knowledge",
+        id: `knowledge:${article.id}`,
+        feedId: `knowledge:${article.id}`,
+        date: article.createdAt,
+        title: article.title,
+        body: article.detail,
+        meta: article.fileName || article.type || "Dokument",
+        createdAt: article.createdAt,
+      }),
+    ),
+    ...requests.map((request) =>
+      makeUnifiedCalendarItem({
+        source: "time",
+        id: `request:${request.id}`,
+        feedId: `request:${request.id}`,
+        date: request.updatedAt || request.createdAt,
+        title: request.title,
+        body: request.detail,
+        meta: request.status,
+        createdAt: request.updatedAt || request.createdAt,
+      }),
+    ),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.sortValue - b.sortValue || a.sourceLabel.localeCompare(b.sourceLabel) || a.title.localeCompare(b.title));
+}
+
+function renderCalendarLegend(items) {
+  const legend = $("#calendarLegend");
+  if (!legend) return;
+  const activeSources = items.reduce((counts, item) => {
+    counts.set(item.sourceId, (counts.get(item.sourceId) || 0) + 1);
+    return counts;
+  }, new Map());
+  legend.innerHTML = calendarSources
+    .filter((source) => activeSources.has(source.id))
+    .map((source) => {
+      const hidden = hiddenCalendarSourceIds.has(source.id);
+      return `<button class="calendar-legend-item ${source.className} ${hidden ? "is-hidden" : ""}" type="button" data-calendar-source-filter="${escapeHtml(
+        source.id,
+      )}" aria-pressed="${hidden ? "false" : "true"}" title="${hidden ? "Pokaż" : "Ukryj"}: ${escapeHtml(
+        source.label,
+      )}">${escapeHtml(source.label)} <small>${activeSources.get(source.id)}</small></button>`;
+    })
+    .join("");
+}
+
+function toggleCalendarSourceFilter(sourceId) {
+  const source = calendarSourceMap[sourceId];
+  if (!source) return;
+  if (hiddenCalendarSourceIds.has(sourceId)) {
+    hiddenCalendarSourceIds.delete(sourceId);
+  } else {
+    hiddenCalendarSourceIds.add(sourceId);
+  }
+  renderCalendar();
+}
+
+function calendarEntryCountLabel(count) {
+  if (count === 1) return "1 wpis";
+  if (count > 1 && count < 5) return `${count} wpisy`;
+  return `${count} wpisów`;
+}
+
+function calendarVisibleItems() {
+  return getUnifiedCalendarItems().filter((item) => !hiddenCalendarSourceIds.has(item.sourceId));
+}
+
+function renderCalendarDayDetailItem(event) {
+  return `
+    <article class="calendar-day-detail-card ${event.sourceClass}">
+      <header>
+        <span>${escapeHtml(event.sourceLabel)}</span>
+        <strong>${escapeHtml(event.title)}</strong>
+      </header>
+      <div class="calendar-day-detail-meta">
+        <span>${escapeHtml(event.dateLabel)}${event.time ? `, ${escapeHtml(event.time)}` : ""}</span>
+        ${event.meta ? `<span>${escapeHtml(event.meta)}</span>` : ""}
+      </div>
+      ${event.body ? `<p>${escapeHtml(event.body)}</p>` : ""}
+      <div class="calendar-event-actions">
+        ${
+          event.nativeEventId
+            ? `<button class="secondary-button" data-rsvp="${escapeHtml(event.nativeEventId)}" type="button" ${
+                event.rsvp === "Będę" ? "disabled" : ""
+              }>${event.rsvp === "Będę" ? "Potwierdzono" : "Będę"}</button>`
+            : ""
+        }
+        ${event.feedId ? `<button class="secondary-button" data-calendar-day-source="${escapeHtml(event.feedId)}" type="button">Przejdź do źródła</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderCalendarDayDetails(day) {
+  const safeDay = normalizeCalendarDayValue(day);
+  if (!safeDay) return;
+  activeCalendarDay = safeDay;
+  const allItems = getUnifiedCalendarItems().filter((item) => item.day === safeDay);
+  const visibleItems = allItems.filter((item) => !hiddenCalendarSourceIds.has(item.sourceId));
+  const title = $("#calendarDayTitle");
+  const meta = $("#calendarDayMeta");
+  const list = $("#calendarDayList");
+  if (title) title.textContent = `${calendarDateLabelForDay(safeDay)} · szczegóły dnia`;
+  if (meta) {
+    meta.textContent = visibleItems.length
+      ? `${calendarEntryCountLabel(visibleItems.length)} widocznych w kalendarzu.`
+      : allItems.length
+        ? "Wpisy z tego dnia są ukryte przez filtry legendy."
+        : "Tego dnia nie ma jeszcze żadnych wpisów.";
+  }
+  if (list) {
+    list.innerHTML = visibleItems.length
+      ? visibleItems.map(renderCalendarDayDetailItem).join("")
+      : `<div class="empty-state">${allItems.length ? "Kliknij wyłączony kolor w legendzie, aby przywrócić wpisy." : "Brak wpisów dla tego dnia."}</div>`;
+  }
+}
+
+function openCalendarDayDetails(day) {
+  renderCalendarDayDetails(day);
+  openDialog("#calendarDayDialog");
+}
+
 function renderCalendar() {
   calendarEvents = calendarEvents.map(normalizeCalendarEvent).sort((a, b) => a.day - b.day || a.time.localeCompare(b.time));
+  const allUnifiedItems = getUnifiedCalendarItems();
+  const unifiedItems = calendarVisibleItems();
   $("#calendarGrid").innerHTML = Array.from({ length: 31 }, (_, index) => {
     const day = index + 1;
-    const dayEvents = calendarEvents.filter((item) => item.day === day);
+    const dayEvents = unifiedItems.filter((item) => item.day === day);
+    const hiddenCount = Math.max(0, dayEvents.length - 4);
     return `
-      <div class="calendar-day">
-        <strong>${day}</strong>
-        ${dayEvents.map((event) => `<span class="event-chip">${escapeHtml(event.title)}</span>`).join("")}
-      </div>
+      <button class="calendar-day ${dayEvents.length ? "has-events" : ""}" data-calendar-day="${day}" type="button" aria-label="${escapeHtml(
+        `${calendarDateLabelForDay(day)}: ${calendarEntryCountLabel(dayEvents.length)}`,
+      )}">
+        <span class="calendar-day-head">
+          <strong>${day}</strong>
+          <small>${escapeHtml(calendarEntryCountLabel(dayEvents.length))}</small>
+        </span>
+        ${dayEvents
+          .slice(0, 4)
+          .map(
+            (event) =>
+              `<span class="event-chip ${event.sourceClass}" title="${escapeHtml(
+                `${event.sourceLabel}: ${event.title}`,
+              )}"><em>${escapeHtml(event.sourceLabel)}</em>${escapeHtml(event.title)}</span>`,
+          )
+          .join("")}
+        ${hiddenCount ? `<span class="event-chip muted-chip">+${hiddenCount} więcej</span>` : ""}
+      </button>
     `;
   }).join("");
 
-  $("#eventList").innerHTML = calendarEvents.length
-    ? calendarEvents
+  renderCalendarLegend(allUnifiedItems);
+
+  $("#eventList").innerHTML = unifiedItems.length
+    ? unifiedItems
         .map(
           (event) => `
-            <article>
+            <article class="calendar-list-item ${event.sourceClass}">
               <strong>${escapeHtml(event.title)}</strong>
-              <span>${escapeHtml(event.date)}, ${escapeHtml(event.time)} · ${event.attendees} będą · ${escapeHtml(
-                event.rsvp,
-              )}</span>
-              <button class="secondary-button" data-rsvp="${escapeHtml(event.id)}" type="button" ${
-                event.rsvp === "Będę" ? "disabled" : ""
-              }>${event.rsvp === "Będę" ? "Potwierdzono" : "Będę"}</button>
+              <span>${escapeHtml(event.sourceLabel)} · ${escapeHtml(event.dateLabel)}${
+                event.time ? `, ${escapeHtml(event.time)}` : ""
+              }${event.meta ? ` · ${escapeHtml(event.meta)}` : ""}</span>
+              ${event.body ? `<p>${escapeHtml(event.body)}</p>` : ""}
+              <div class="calendar-event-actions">
+                ${
+                  event.nativeEventId
+                    ? `<button class="secondary-button" data-rsvp="${escapeHtml(event.nativeEventId)}" type="button" ${
+                        event.rsvp === "Będę" ? "disabled" : ""
+                      }>${event.rsvp === "Będę" ? "Potwierdzono" : "Będę"}</button>`
+                    : ""
+                }
+                ${event.feedId ? `<button class="secondary-button" data-feed-source="${escapeHtml(event.feedId)}" type="button">Przejdź</button>` : ""}
+              </div>
             </article>
           `,
         )
         .join("")
-    : `<div class="empty-state">Brak wydarzeń w kalendarzu.</div>`;
+    : allUnifiedItems.length
+      ? `<div class="empty-state">Wybrane typy wpisów są teraz ukryte w legendzie.</div>`
+      : `<div class="empty-state">Brak wydarzeń w kalendarzu.</div>`;
   renderDashboardUpcoming();
+  if ($("#calendarDayDialog")?.open && activeCalendarDay) renderCalendarDayDetails(activeCalendarDay);
 }
 
 function renderDashboardUpcoming() {
   const list = $("#dashboardUpcomingList");
   if (!list) return;
-  const upcoming = calendarEvents.slice(0, 3);
+  const todayDay = normalizeCalendarDayValue(visibleCalendarDate().getDate()) || 1;
+  const upcoming = getUnifiedCalendarItems()
+    .filter((event) => event.day >= todayDay)
+    .slice(0, 3);
   list.innerHTML = upcoming.length
     ? upcoming
-        .map((event) => `<li><time>${escapeHtml(event.date || "-")}</time><span>${escapeHtml(event.title)}</span></li>`)
+        .map(
+          (event) =>
+            `<li><time>${escapeHtml(event.dateLabel || "-")}</time><span>${escapeHtml(event.sourceLabel)}: ${escapeHtml(
+              event.title,
+            )}</span></li>`,
+        )
         .join("")
     : `<li class="empty-state">Brak nadchodzących wydarzeń.</li>`;
 }
@@ -4065,6 +4837,20 @@ function reportStatusColor(report) {
   return "teal";
 }
 
+function reportCategoryAccent(report) {
+  const category = normalizeSearch(report.category);
+  if (category.includes("braki") || category.includes("towar")) return "is-stock";
+  if (category.includes("awaria") || category.includes("sprzet")) return "is-equipment";
+  if (category.includes("organiz")) return "is-company";
+  return "is-general";
+}
+
+function reportStateAccent(report) {
+  if (reportIsClosed(report)) return "is-done";
+  if (reportIsAccepted(report)) return "is-accepted";
+  return "is-new";
+}
+
 function renderReports() {
   normalizeReports();
   const visibleReports = reports
@@ -4094,13 +4880,15 @@ function renderReports() {
             <button class="secondary-button" data-report-close="${report.id}" type="button">Oznacz załatwione</button>
           `;
       return `
-        <article class="report-card ${isClosed ? "is-complete" : ""} ${reportIsAccepted(report) ? "is-accepted" : ""}">
-          <div class="card-line">
-            <strong>${escapeHtml(report.title)}</strong>
-            <span class="pill ${reportStatusColor(report)}">${escapeHtml(report.status)}</span>
+        <article class="report-card report-item ${isClosed ? "is-complete" : ""} ${reportIsAccepted(report) ? "is-accepted" : ""}">
+          <div class="report-item-top">
+            <span class="report-tag ${reportCategoryAccent(report)}">${escapeHtml(report.category)}</span>
+            <span class="report-state ${reportStateAccent(report)}">${escapeHtml(report.status)}</span>
+            <span class="report-time">${escapeHtml(activityTimeLabel(report.updatedAt || report.createdAt, report.createdAt || "teraz"))}</span>
           </div>
-          <span class="muted">${escapeHtml(report.category)} · ${escapeHtml(report.owner)}</span>
-          <p class="note">${escapeHtml(report.detail)}</p>
+          <h3>${escapeHtml(report.title)}</h3>
+          <p class="report-detail">${escapeHtml(report.detail)}</p>
+          <div class="report-sub">Zgłosił: ${escapeHtml(report.owner)}</div>
           ${
             report.fileName
               ? `<div class="report-attachment">
@@ -4114,7 +4902,7 @@ function renderReports() {
                 </div>`
               : ""
           }
-          <div class="card-actions">
+          <div class="card-actions report-actions">
             ${actions}
           </div>
         </article>
@@ -4126,32 +4914,248 @@ function renderReports() {
   renderNotifications();
 }
 
+function statPercent(value, total) {
+  if (!total) return 0;
+  return Math.round((Number(value || 0) / total) * 100);
+}
+
+function statsPeopleSource() {
+  const source = timeSummary?.people?.length ? timeSummary.people : activePeople();
+  return source.filter((person) => person.active !== false);
+}
+
+function statsWorkSeconds(person, range) {
+  if (!person) return 0;
+  if (range === "today") return Number(person.todaySeconds || person.scheduledTodaySeconds || 0);
+  if (range === "week") return Math.max(Number(person.weekSeconds || 0), Number(person.scheduledWeekSeconds || 0));
+  if (range === "month") return Math.max(Number(person.monthSeconds || 0), Number(person.scheduledMonthSeconds || 0));
+  return 0;
+}
+
+function monthShortLabel(date) {
+  return new Intl.DateTimeFormat("pl-PL", { month: "short" }).format(date).replace(".", "");
+}
+
+function buildStatsActivityBuckets() {
+  const today = new Date();
+  const buckets = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(today.getDate() - (6 - index));
+    return {
+      key: formatDateInput(date),
+      label: new Intl.DateTimeFormat("pl-PL", { weekday: "short" }).format(date),
+      count: 0,
+    };
+  });
+  const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+  buildActivityFeedItems().forEach((item) => {
+    const date = new Date(item.sortValue);
+    if (Number.isNaN(date.getTime())) return;
+    const bucket = byKey.get(formatDateInput(date));
+    if (bucket) bucket.count += 1;
+  });
+  return buckets;
+}
+
+function buildStatsTrendBuckets() {
+  const today = new Date();
+  const buckets = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(today.getFullYear(), today.getMonth() - (5 - index), 1);
+    return {
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
+      label: monthShortLabel(date),
+      count: 0,
+    };
+  });
+  const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+  buildActivityFeedItems().forEach((item) => {
+    const date = new Date(item.sortValue);
+    if (Number.isNaN(date.getTime())) return;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const bucket = byKey.get(key);
+    if (bucket) bucket.count += 1;
+  });
+  return buckets;
+}
+
 function renderStats() {
   const summary = $("#statsSummary");
-  const chart = $("#statsBarChart");
+  const activityChart = $("#statsBarChart");
   const issueList = $("#statsIssueList");
-  if (!summary || !chart || !issueList) return;
+  const peopleChart = $("#statsPeopleHoursChart");
+  const taskStatusChart = $("#statsTaskStatusChart");
+  const trendChart = $("#statsTrendChart");
+  const teamTable = $("#statsTeamTable");
+  if (!summary || !activityChart || !issueList || !peopleChart || !taskStatusChart || !trendChart || !teamTable) return;
 
-  const taskItems = Object.values(tasks).flatMap((items) => items || []);
-  const doneTasks = tasks.done?.length || 0;
-  const openReports = reports.filter((report) => report.status !== "Załatwione");
+  const taskItems = Object.entries(tasks).flatMap(([column, items]) =>
+    (items || []).map((task) => ({ ...task, column })),
+  );
+  const taskCounts = {
+    todo: tasks.todo?.length || 0,
+    doing: tasks.doing?.length || 0,
+    review: tasks.review?.length || 0,
+    done: tasks.done?.length || 0,
+  };
+  const totalTasks = taskItems.length;
+  const doneTasks = taskCounts.done;
+  const openReports = reports.filter((report) => !reportIsClosed(report));
+  const acceptedReports = reports.filter(reportIsAccepted).length;
+  const closedReports = reports.filter(reportIsClosed).length;
   const unreadUrgent = posts.filter((post) => post.priority === "urgent" && post.unread).length;
+  const peopleStats = statsPeopleSource();
+  const presentPeople = peopleStats.filter((person) => person.state === "work" || person.state === "break").length;
+  const attendance = statPercent(presentPeople, peopleStats.length);
+  const totalTodaySeconds = peopleStats.reduce((sum, person) => sum + statsWorkSeconds(person, "today"), 0);
+  const totalWeekSeconds = peopleStats.reduce((sum, person) => sum + statsWorkSeconds(person, "week"), 0);
+  const totalMonthSeconds = peopleStats.reduce((sum, person) => sum + statsWorkSeconds(person, "month"), 0);
 
-  if (!taskItems.length && !reports.length && !posts.length) {
+  $("#statsMonthHours").textContent = formatWorkDuration(totalMonthSeconds);
+  $("#statsDoneTasks").textContent = String(doneTasks);
+  $("#statsOpenReports").textContent = String(openReports.length);
+  $("#statsAttendance").textContent = `${attendance}%`;
+  $("#statsMonthTrend").textContent = `Tydzień: ${formatWorkDuration(totalWeekSeconds)}`;
+  $("#statsDoneTrend").textContent = totalTasks ? `${statPercent(doneTasks, totalTasks)}% wszystkich zadań` : "Brak zadań";
+  $("#statsReportTrend").textContent = `${acceptedReports} przyjęte, ${closedReports} zamknięte`;
+  $("#statsAttendanceTrend").textContent = `${presentPeople}/${peopleStats.length || 0} osób w pracy`;
+  $("#statsOpenReportsBadge").textContent = String(openReports.length);
+  $("#statsTeamCount").textContent = `${peopleStats.length} osób`;
+
+  if (!taskItems.length && !reports.length && !posts.length && !kbArticles.length && !calendarEvents.length) {
     summary.textContent = "Brak danych do raportu.";
   } else {
-    summary.textContent = `Zadania wykonane: ${doneTasks}, otwarte zgłoszenia: ${openReports.length}, pilne nieodczytane ogłoszenia: ${unreadUrgent}.`;
+    summary.textContent = `Dziś: ${formatWorkDuration(totalTodaySeconds)} pracy, ${doneTasks} zadań ukończonych, ${openReports.length} zgłoszeń otwartych, ${unreadUrgent} pilnych ogłoszeń do odczytu.`;
   }
 
-  const bars = [tasks.todo?.length || 0, tasks.doing?.length || 0, tasks.review?.length || 0, doneTasks, openReports.length];
-  const max = Math.max(1, ...bars);
-  chart.innerHTML = bars
-    .map((value) => `<span style="height: ${Math.max(10, Math.round((value / max) * 100))}%"></span>`)
+  const maxPersonSeconds = Math.max(1, ...peopleStats.map((person) => statsWorkSeconds(person, "month")));
+  peopleChart.innerHTML = peopleStats.length
+    ? peopleStats
+        .map((person) => {
+          const seconds = statsWorkSeconds(person, "month");
+          const width = Math.max(4, Math.round((seconds / maxPersonSeconds) * 100));
+          return `
+            <div class="stats-person-row">
+              <span class="avatar">${escapeHtml(person.initials || makeInitials(person.name))}</span>
+              <div>
+                <strong>${escapeHtml(person.name || person.login)}</strong>
+                <div class="stats-track"><span style="width: ${width}%"></span></div>
+              </div>
+              <em>${escapeHtml(formatWorkDuration(seconds))}</em>
+            </div>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Brak danych czasu pracy.</div>`;
+
+  const donutSegments = [
+    { label: "Do zrobienia", value: taskCounts.todo, color: "var(--amber)", className: "amber" },
+    { label: "W trakcie", value: taskCounts.doing, color: "var(--teal)", className: "teal" },
+    { label: "Do sprawdzenia", value: taskCounts.review, color: "#2563eb", className: "blue" },
+    { label: "Zrobione", value: taskCounts.done, color: "var(--green)", className: "green" },
+  ];
+  let segmentOffset = 0;
+  const conicParts = donutSegments.map((segment) => {
+    const start = totalTasks ? (segmentOffset / totalTasks) * 360 : 0;
+    segmentOffset += segment.value;
+    const end = totalTasks ? (segmentOffset / totalTasks) * 360 : 0;
+    return `${segment.color} ${start}deg ${end}deg`;
+  });
+  const donutBackground = totalTasks ? conicParts.join(", ") : "var(--surface-strong) 0deg 360deg";
+  taskStatusChart.innerHTML = `
+    <div class="stats-donut" style="background: conic-gradient(${donutBackground});">
+      <strong>${totalTasks}</strong>
+      <span>zadań</span>
+    </div>
+    <div class="stats-status-legend">
+      ${donutSegments
+        .map(
+          (segment) => `
+            <div>
+              <span class="stats-dot ${segment.className}"></span>
+              <p>${escapeHtml(segment.label)}</p>
+              <strong>${segment.value}</strong>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+
+  const activityBuckets = buildStatsActivityBuckets();
+  const maxActivity = Math.max(1, ...activityBuckets.map((bucket) => bucket.count));
+  activityChart.innerHTML = activityBuckets
+    .map((bucket) => {
+      const height = Math.max(bucket.count ? 18 : 6, Math.round((bucket.count / maxActivity) * 100));
+      return `
+        <div class="stats-activity-bar">
+          <span style="height: ${height}%"></span>
+          <strong>${bucket.count}</strong>
+          <small>${escapeHtml(bucket.label)}</small>
+        </div>
+      `;
+    })
     .join("");
+
+  const trendBuckets = buildStatsTrendBuckets();
+  const maxTrend = Math.max(1, ...trendBuckets.map((bucket) => bucket.count));
+  const trendTotal = trendBuckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  $("#statsTrendBadge").textContent = `${trendTotal} wpisów`;
+  trendChart.innerHTML = trendBuckets
+    .map((bucket) => {
+      const height = Math.max(bucket.count ? 20 : 7, Math.round((bucket.count / maxTrend) * 100));
+      return `
+        <div class="stats-trend-point">
+          <span style="height: ${height}%"></span>
+          <strong>${bucket.count}</strong>
+          <small>${escapeHtml(bucket.label)}</small>
+        </div>
+      `;
+    })
+    .join("");
+
+  teamTable.innerHTML = peopleStats.length
+    ? peopleStats
+        .map((person) => {
+          const login = normalizeLogin(person.login);
+          const taskCount = taskItems.filter((task) => {
+            const taskLogin = normalizeLogin(task.ownerLogin || "");
+            return taskLogin ? taskLogin === login : normalizeSearch(task.owner) === normalizeSearch(person.name);
+          }).length;
+          const status = presenceStatusForState(person.state, person.active !== false);
+          return `
+            <tr>
+              <td>
+                <div class="stats-user-cell">
+                  <span class="avatar">${escapeHtml(person.initials || makeInitials(person.name))}</span>
+                  <strong>${escapeHtml(person.name || person.login)}</strong>
+                </div>
+              </td>
+              <td>${escapeHtml(formatWorkDuration(statsWorkSeconds(person, "today")))}</td>
+              <td>${escapeHtml(formatWorkDuration(statsWorkSeconds(person, "week")))}</td>
+              <td>${escapeHtml(formatWorkDuration(statsWorkSeconds(person, "month")))}</td>
+              <td>${taskCount}</td>
+              <td><span class="pill ${person.state === "work" ? "green" : person.state === "break" ? "amber" : ""}">${escapeHtml(status)}</span></td>
+            </tr>
+          `;
+        })
+        .join("")
+    : `<tr><td colspan="6"><div class="empty-state">Brak aktywnych użytkowników.</div></td></tr>`;
 
   issueList.innerHTML = openReports.length
     ? openReports
-        .map((report) => `<button data-stat-report="${escapeHtml(report.id)}" type="button">${escapeHtml(report.title)}</button>`)
+        .slice(0, 8)
+        .map(
+          (report) => `
+            <button data-stat-report="${escapeHtml(report.id)}" type="button">
+              <span>
+                <strong>${escapeHtml(report.title)}</strong>
+                <small>${escapeHtml(report.category || "Zgłoszenie")} · ${escapeHtml(report.owner || "Użytkownik")}</small>
+              </span>
+              <span class="pill ${escapeHtml(reportStatusColor(report))}">${escapeHtml(report.status || "Nowe")}</span>
+            </button>
+          `,
+        )
         .join("")
     : `<div class="empty-state">Brak otwartych zgłoszeń.</div>`;
 }
@@ -4462,7 +5466,9 @@ function getVisibleNotifications() {
       byId.set(notification.id, notification);
     }
   });
-  return [...byId.values()].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  return [...byId.values()]
+    .filter(notificationAllowed)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
 }
 
 function notificationCategory(notification) {
@@ -4487,6 +5493,23 @@ function notificationCategory(notification) {
   if (text.includes("wiedzy") || text.includes("dokument") || text.includes("zeszyt")) return "knowledge";
   if (text.includes("konto") || text.includes("haslo") || text.includes("zespol")) return "team";
   return "dashboard";
+}
+
+function notificationSourceId(notification) {
+  const normalized = normalizeNotification(notification);
+  const category = normalized.category || notificationCategory(normalized);
+  const text = normalizeSearch(`${normalized.title || ""} ${normalized.body || ""}`);
+  if (category === "reports" && /(brak|braki|towar|magazyn|stan|stany)/.test(text)) return "inventory";
+  return Object.prototype.hasOwnProperty.call(defaultNotificationPreferences, category) ? category : "dashboard";
+}
+
+function notificationSourceEnabled(sourceId) {
+  return userPreferences.notifications?.[sourceId] !== false;
+}
+
+function notificationAllowed(notification) {
+  const normalized = normalizeNotification(notification);
+  return normalized.persistent || notificationSourceEnabled(notificationSourceId(normalized));
 }
 
 function notificationFilterLabel(filterId) {
@@ -4542,7 +5565,7 @@ function renderNavNotificationBadges(sourceNotifications = getVisibleNotificatio
     (sum, conversation) => sum + unreadIncomingCount(conversation.id),
     0,
   );
-  if (unreadChatMessages) {
+  if (unreadChatMessages && notificationSourceEnabled("chat")) {
     counts.set("chat", Math.max(counts.get("chat") || 0, unreadChatMessages));
   }
 
@@ -4562,8 +5585,12 @@ function renderNotifications() {
   renderNotificationFilterOptions(allNotifications);
   renderedNotifications = allNotifications.filter(notificationMatchesFilter);
   const unread = allNotifications.filter((notification) => notification.unread).length;
-  $(".bell strong").textContent = unread;
-  $(".bell span").classList.toggle("hidden", unread === 0);
+  const bell = $("#notificationsButton");
+  if (bell) {
+    bell.classList.toggle("has-unread", unread > 0);
+    bell.querySelector("strong").textContent = unread > 99 ? "99+" : String(unread);
+    bell.querySelector(".bell-indicator")?.classList.toggle("hidden", unread === 0);
+  }
   $("#notificationList").innerHTML = renderedNotifications.length
     ? renderedNotifications
     .map(
@@ -4625,6 +5652,7 @@ function pushNotification(title, body, target = inferNotificationTarget(title, b
     unread: true,
     createdAt: Date.now(),
   });
+  if (!notificationAllowed(notification)) return;
   notificationReadIds.delete(notification.id);
   notifications = notifications.filter((item) => normalizeNotification(item).id !== notification.id);
   notifications.unshift(notification);
@@ -4884,6 +5912,15 @@ function getVisibleConversations() {
 
 function getConversationLastMessage(conversation) {
   return conversation.messages?.length ? conversation.messages[conversation.messages.length - 1] : null;
+}
+
+function getConversationInitials(conversation) {
+  if (conversation.kind === "direct") {
+    const otherLogin = conversation.memberLogins?.find((login) => login !== getActiveLogin());
+    const person = getPersonByLogin(otherLogin);
+    return person?.initials || makeInitials(conversation.title);
+  }
+  return makeInitials(String(conversation.title || "").replace(/^#\s*/, ""));
 }
 
 function getRecentChatConversations(limit = 4) {
@@ -5160,10 +6197,13 @@ function renderChat() {
     .map(
       (conversation) => {
         const unreadCount = unreadIncomingCount(conversation.id);
+        const lastMessage = getConversationLastMessage(conversation);
+        const metaLabel = lastMessage?.time || (conversation.kind === "direct" ? "kontakt" : "grupa");
+        const initials = getConversationInitials(conversation);
         return `
         <button class="conversation-button ${conversation.id === currentConversation ? "active" : ""} ${
           unreadCount ? "unread" : ""
-        }" data-conversation="${conversation.id}" type="button">
+        }" data-conversation="${conversation.id}" data-initials="${escapeHtml(initials)}" data-chat-meta="${escapeHtml(metaLabel)}" type="button">
           <span class="conversation-button-top">
             <strong>${escapeHtml(conversation.title)}</strong>
             <span class="conversation-alert ${unreadCount ? "" : "hidden"}" data-conversation-alert ${
@@ -5179,12 +6219,13 @@ function renderChat() {
 
   const conversation = availableConversations.find((item) => item.id === currentConversation) || availableConversations[0];
   $("#chatTitle").textContent = conversation.title;
+  $("#chat .chat-panel .panel-header")?.setAttribute("data-chat-initials", getConversationInitials(conversation));
   $("#messageList").innerHTML = conversation.messages.length
     ? conversation.messages
         .map((message) => {
           const ownMessage = isOwnMessage(message);
           return `
-        <article class="message ${ownMessage ? "mine" : ""}">
+        <article class="message ${ownMessage ? "mine me" : "them"}">
           <strong>${escapeHtml(getMessageAuthor(message))}</strong>
           <span>${escapeHtml(message.body)}</span>
           ${renderAttachments(message.attachments)}
@@ -5335,6 +6376,21 @@ function activateView(viewId) {
   if (["dashboard", "time"].includes(viewId) && backendAvailable && isLoggedIn()) {
     refreshPresence();
   }
+  if (viewId === "stats") {
+    renderStats();
+    if (backendAvailable && isLoggedIn()) {
+      Promise.all([
+        syncTasksFromBackend({ silent: true }),
+        syncReportsFromBackend({ silent: true }),
+        syncRequestsFromBackend({ silent: true }),
+        syncCalendarFromBackend({ silent: true }),
+        syncKnowledgeFromBackend({ silent: true }),
+        syncTimeSummaryFromBackend({ silent: true }),
+      ]).then((changes) => {
+        if (changes.some(Boolean)) renderStats();
+      });
+    }
+  }
   if (viewId === "tasks" && backendAvailable && isLoggedIn()) {
     syncTasksFromBackend({ silent: true }).then((changed) => {
       if (changed) renderTaskState();
@@ -5395,16 +6451,24 @@ function restoreDashboardLayout() {
 function bindDashboardDrag() {
   let dragged = null;
   $$("#dashboardGrid .widget").forEach((widget) => {
-    widget.addEventListener("dragstart", () => {
+    widget.draggable = true;
+    widget.addEventListener("dragstart", (event) => {
       dragged = widget;
+      event.dataTransfer.effectAllowed = "move";
       widget.classList.add("dragging");
     });
     widget.addEventListener("dragend", () => {
       widget.classList.remove("dragging");
+      $$("#dashboardGrid .widget.drag-over").forEach((item) => item.classList.remove("drag-over"));
       dragged = null;
     });
-    widget.addEventListener("dragover", (event) => event.preventDefault());
+    widget.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      if (dragged && dragged !== widget) widget.classList.add("drag-over");
+    });
+    widget.addEventListener("dragleave", () => widget.classList.remove("drag-over"));
     widget.addEventListener("drop", () => {
+      widget.classList.remove("drag-over");
       if (!dragged || dragged === widget) return;
       widget.parentNode.insertBefore(dragged, widget);
       saveDashboardLayout();
@@ -6043,6 +7107,7 @@ async function createKnowledgeArticle(event) {
 async function boot() {
   updateTodayLabel();
   loadStoredState();
+  applyUserPreferences(defaultUserPreferences);
   await syncAccountsFromBackend(undefined, { silent: true });
   renderMyDay();
   renderPeople();
@@ -6088,9 +7153,23 @@ async function boot() {
     refreshUserScopedUi();
   });
   $("#themeToggle").addEventListener("click", () => {
-    const isDark = document.documentElement.dataset.theme === "dark";
-    document.documentElement.dataset.theme = isDark ? "" : "dark";
-    $("#themeToggle").textContent = isDark ? "Tryb ciemny" : "Tryb jasny";
+    saveUserPreferences({ theme: userPreferences.theme === "dark" ? "light" : "dark" });
+  });
+  $$("[data-settings-theme]").forEach((input) => {
+    input.addEventListener("change", (event) => {
+      if (event.target.checked) saveUserPreferences({ theme: event.target.value });
+    });
+  });
+  $$("[data-settings-accent]").forEach((input) => {
+    input.addEventListener("change", (event) => {
+      if (event.target.checked) saveUserPreferences({ accent: event.target.value });
+    });
+  });
+  $$("[data-settings-notification]").forEach((input) => {
+    input.addEventListener("change", (event) => {
+      saveUserPreferences({ notifications: { [event.target.value]: event.target.checked } });
+      renderNotifications();
+    });
   });
   $("#clockButton").addEventListener("click", toggleClock);
   $("#timeClockButton").addEventListener("click", toggleClock);
@@ -6172,6 +7251,7 @@ async function boot() {
     showToast("Powiadomienia odczytane");
   });
   $("#exportTimeButton").addEventListener("click", exportTimeCsv);
+  $("#statsExportButton").addEventListener("click", exportTimeCsv);
   $("#scheduleEditorForm").addEventListener("submit", saveScheduleEditor);
   $("#scheduleEditorMode").addEventListener("change", updateScheduleEditorMode);
   $("#scheduleClearButton").addEventListener("click", clearScheduleEditor);
@@ -6283,6 +7363,25 @@ async function boot() {
     const scheduleEditButton = event.target.closest("[data-schedule-edit]");
     if (scheduleEditButton) {
       openScheduleEditor(scheduleEditButton);
+      return;
+    }
+
+    const calendarSourceFilterButton = event.target.closest("[data-calendar-source-filter]");
+    if (calendarSourceFilterButton) {
+      toggleCalendarSourceFilter(calendarSourceFilterButton.dataset.calendarSourceFilter);
+      return;
+    }
+
+    const calendarDaySourceButton = event.target.closest("[data-calendar-day-source]");
+    if (calendarDaySourceButton) {
+      $("#calendarDayDialog")?.close();
+      await openFeedItemSource(calendarDaySourceButton.dataset.calendarDaySource);
+      return;
+    }
+
+    const calendarDayButton = event.target.closest("[data-calendar-day]");
+    if (calendarDayButton) {
+      openCalendarDayDetails(calendarDayButton.dataset.calendarDay);
       return;
     }
 
@@ -6564,6 +7663,13 @@ async function boot() {
     const pollButton = event.target.closest("[data-poll-vote]");
     if (pollButton) {
       await voteQuickPoll(pollButton.dataset.pollVote, Number(pollButton.dataset.pollOption));
+      return;
+    }
+
+    const announcementFocusButton = event.target.closest("[data-focus-announcement-form]");
+    if (announcementFocusButton) {
+      $("#announcementForm")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.setTimeout(() => $("#postTitle")?.focus(), 220);
       return;
     }
 

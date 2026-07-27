@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0f766e" />
+    <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=74" />
+    <link rel="stylesheet" href="styles.css?v=95" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -49,6 +49,11 @@
         </div>
 
         <nav class="nav-list">
+          <span class="nav-section" data-nav-section="overview">Przegląd</span>
+          <span class="nav-section" data-nav-section="work">Praca</span>
+          <span class="nav-section" data-nav-section="communication">Komunikacja</span>
+          <span class="nav-section" data-nav-section="company">Firma</span>
+          <span class="nav-section" data-nav-section="system">System</span>
           <button class="nav-item active" data-view="dashboard">Tablica</button>
           <button class="nav-item" data-view="announcements">Ogłoszenia</button>
           <button class="nav-item" data-view="tasks">Zadania</button>
@@ -60,6 +65,7 @@
           <button class="nav-item" data-view="team">Zespół</button>
           <button class="nav-item admin-only" data-view="stats">Statystyki</button>
           <button class="nav-item admin-only" data-view="activity">Historia</button>
+          <button class="nav-item" data-view="settings">Ustawienia</button>
         </nav>
 
         <div class="sidebar-footer">
@@ -94,7 +100,13 @@
               <input id="globalSearchInput" type="search" placeholder="Szukaj w panelu..." aria-label="Szukaj w panelu" />
               <button class="search-button" type="submit">Szukaj</button>
             </form>
+            <div class="topbar-work-counter" id="topbarWorkCounter" data-clock-state="out" aria-label="Dzisiejszy czas pracy">
+              <span>Dziś</span>
+              <strong id="topbarWorkTimer">00:00:00</strong>
+            </div>
             <button class="bell" id="notificationsButton" type="button" aria-label="Powiadomienia">
+              <span class="bell-icon" aria-hidden="true">@</span>
+              <span class="bell-indicator" aria-hidden="true"></span>
               <span>●</span>
               <strong>7</strong>
             </button>
@@ -212,8 +224,14 @@
         </section>
 
         <section id="announcements" class="view">
+          <div class="announcements-page-head">
+            <div>
+              <h2>Ogłoszenia firmowe</h2>
+              <p>Publikuj komunikaty dla zespołu, śledź potwierdzenia odczytu, reakcje, komentarze i załączniki.</p>
+            </div>
+          </div>
           <div class="split-layout">
-            <form class="panel form-panel" id="announcementForm" enctype="multipart/form-data">
+            <form class="panel form-panel announcement-form-panel" id="announcementForm" enctype="multipart/form-data">
               <header class="panel-header">
                 <h2>Nowe ogłoszenie</h2>
                 <span class="pill">Adresaci i odczyty</span>
@@ -246,21 +264,31 @@
               <button class="primary-button" type="submit">Opublikuj</button>
             </form>
 
-            <div class="panel">
+            <div class="panel announcement-feed-panel">
               <header class="panel-header">
-                <h2>Ogłoszenia</h2>
+                <h2>Tablica ogłoszeń</h2>
                 <div class="segmented">
                   <button class="active" data-announcement-filter="active" type="button">Aktywne</button>
                   <button data-announcement-filter="urgent" type="button">Pilne</button>
                   <button data-announcement-filter="mine" type="button">Moje</button>
                 </div>
               </header>
+              <button class="announcement-composer-trigger" data-focus-announcement-form type="button">
+                <span class="announcement-composer-avatar" id="announcementComposerAvatar">PK</span>
+                <span>Napisz ogłoszenie do zespołu...</span>
+              </button>
               <div id="announcementList" class="announcement-list"></div>
             </div>
           </div>
         </section>
 
         <section id="tasks" class="view">
+          <div class="final-page-head">
+            <div>
+              <h2>Zadania</h2>
+              <p>Tablica kanban zespołu. Przeciągnij kartę, aby zmienić status lub otwórz szczegóły zadania.</p>
+            </div>
+          </div>
           <div class="toolbar">
             <div class="segmented">
               <button class="active" data-task-filter="all" type="button">Cała firma</button>
@@ -273,8 +301,37 @@
         </section>
 
         <section id="time" class="view">
+          <div class="final-page-head">
+            <div>
+              <h2>Czas pracy</h2>
+              <p>Ewidencja, grafik zespołu, tygodnie kalendarzowe, wnioski i kalkulator stawek.</p>
+            </div>
+          </div>
           <div class="time-grid">
-            <article class="panel">
+            <section class="time-kpi-strip" aria-label="Podsumowanie czasu pracy">
+              <article class="time-kpi-card">
+                <span>Dziś</span>
+                <strong id="timeTodayTile">0h 00m</strong>
+                <small>Obecność dnia</small>
+              </article>
+              <article class="time-kpi-card">
+                <span>Tydzień</span>
+                <strong id="timeWeekTile">0h 00m</strong>
+                <small>Obecny tydzień</small>
+              </article>
+              <article class="time-kpi-card">
+                <span>Miesiąc</span>
+                <strong id="timeMonthTile">0h 00m</strong>
+                <small>Obecny miesiąc</small>
+              </article>
+              <article class="time-kpi-card accent">
+                <span>Nadgodziny</span>
+                <strong id="timeOvertimeTile">0h 00m</strong>
+                <small>Powyżej grafiku</small>
+              </article>
+            </section>
+
+            <article class="panel time-clock-panel">
               <header class="panel-header">
                 <h2>Ewidencja czasu</h2>
                 <span class="pill green" id="timeLiveBadge">Na żywo</span>
@@ -294,7 +351,23 @@
               </div>
             </article>
 
-            <article class="panel admin-widget">
+            <article class="panel time-week-chart-panel">
+              <header class="panel-header">
+                <h2>Twój tydzień</h2>
+                <span class="pill teal" id="timeWeekChartTotal">0h 00m</span>
+              </header>
+              <div class="time-week-chart" id="timeWeekChart"></div>
+            </article>
+
+            <article class="panel time-day-log-panel">
+              <header class="panel-header">
+                <h2>Rejestr dnia</h2>
+                <span class="pill" id="timeDayLogBadge">Dzisiaj</span>
+              </header>
+              <div class="time-day-log" id="timeDayLog"></div>
+            </article>
+
+            <article class="panel time-pulse-panel admin-widget">
               <header class="panel-header">
                 <h2>Puls firmy</h2>
                 <span class="pill green" id="timePulseBadge">Aktualne</span>
@@ -377,6 +450,12 @@
         </section>
 
         <section id="calendar" class="view">
+          <div class="final-page-head">
+            <div>
+              <h2>Kalendarz</h2>
+              <p>Spotkania, urlopy, dostawy i wydarzenia firmowe w jednym widoku.</p>
+            </div>
+          </div>
           <div class="calendar-layout">
             <div class="panel">
               <header class="panel-header">
@@ -387,15 +466,22 @@
             </div>
             <aside class="panel">
               <header class="panel-header">
-                <h2>Nadchodzące</h2>
-                <span class="pill">RSVP</span>
+                <h2>Wpisy w kalendarzu</h2>
+                <span class="pill">Wspólne</span>
               </header>
+              <div class="calendar-legend" id="calendarLegend"></div>
               <div class="event-list" id="eventList"></div>
             </aside>
           </div>
         </section>
 
         <section id="reports" class="view">
+          <div class="reports-page-head">
+            <div>
+              <h2>Zgłoszenia wewnętrzne</h2>
+              <p>Zgłaszaj problemy i braki z możliwością przyjęcia, zamknięcia oraz zamiany na zadania.</p>
+            </div>
+          </div>
           <div class="split-layout">
             <form class="panel form-panel" id="reportForm">
               <header class="panel-header">
@@ -415,7 +501,7 @@
             </form>
             <div class="panel">
               <header class="panel-header">
-                <h2>Zgłoszenia wewnętrzne</h2>
+                <h2>Zgłoszenia</h2>
                 <div class="segmented">
                   <button class="active" data-report-filter="open" type="button">Wszystkie</button>
                   <button data-report-filter="mine" type="button">Moje</button>
@@ -468,6 +554,12 @@
         </section>
 
         <section id="knowledge" class="view">
+          <div class="final-page-head">
+            <div>
+              <h2>Dokumenty i baza wiedzy</h2>
+              <p>Instrukcje, procedury, pliki do pobrania i notatki zmiany w jednym miejscu.</p>
+            </div>
+          </div>
           <div class="knowledge-layout">
             <div class="panel">
               <header class="panel-header">
@@ -495,6 +587,12 @@
         </section>
 
         <section id="team" class="view">
+          <div class="final-page-head">
+            <div>
+              <h2>Zespół</h2>
+              <p>Profile pracowników, role, uprawnienia, konta i dostęp do aplikacji.</p>
+            </div>
+          </div>
           <form class="panel form-panel password-panel" id="passwordForm">
             <header class="panel-header">
               <div>
@@ -548,20 +646,116 @@
         </section>
 
         <section id="stats" class="view">
-          <div class="stats-dashboard">
-            <article class="panel">
-              <h2>Raport tygodnia</h2>
-              <p id="statsSummary">Brak danych do raportu.</p>
-              <div class="bar-chart" id="statsBarChart" aria-label="Aktywność zespołu"></div>
+          <div class="final-page-head">
+            <div>
+              <h2>Raporty i analityka</h2>
+              <p>Przegląd wydajności zespołu, zadań, zgłoszeń i czasu pracy.</p>
+            </div>
+            <div class="stats-head-actions">
+              <div class="stats-period-chips" aria-label="Zakres raportu">
+                <span class="pill">Tydzień</span>
+                <span class="pill teal">Miesiąc</span>
+                <span class="pill">Kwartał</span>
+              </div>
+              <button class="primary-button" id="statsExportButton" type="button">Eksport CSV</button>
+            </div>
+          </div>
+          <div class="stats-kpi-grid">
+            <article class="stats-kpi-card tone-time">
+              <div class="stats-kpi-icon">h</div>
+              <span>Godziny (miesiąc)</span>
+              <strong id="statsMonthHours">0h</strong>
+              <small id="statsMonthTrend">Z grafiku i ewidencji</small>
             </article>
-            <article class="panel">
-              <h2>Otwarte zgłoszenia</h2>
+            <article class="stats-kpi-card tone-done">
+              <div class="stats-kpi-icon">✓</div>
+              <span>Zadania ukończone</span>
+              <strong id="statsDoneTasks">0</strong>
+              <small id="statsDoneTrend">Z całej tablicy zadań</small>
+            </article>
+            <article class="stats-kpi-card tone-report">
+              <div class="stats-kpi-icon">!</div>
+              <span>Otwarte zgłoszenia</span>
+              <strong id="statsOpenReports">0</strong>
+              <small id="statsReportTrend">Wymagają obsługi</small>
+            </article>
+            <article class="stats-kpi-card tone-attendance">
+              <div class="stats-kpi-icon">%</div>
+              <span>Frekwencja teraz</span>
+              <strong id="statsAttendance">0%</strong>
+              <small id="statsAttendanceTrend">Osoby wbite / aktywne konta</small>
+            </article>
+          </div>
+          <div class="stats-dashboard">
+            <article class="panel stats-chart-card">
+              <header class="panel-header">
+                <h2>Godziny wg pracownika</h2>
+                <span class="pill teal">Miesiąc</span>
+              </header>
+              <div class="stats-people-chart" id="statsPeopleHoursChart" aria-label="Godziny pracy według pracownika"></div>
+            </article>
+            <article class="panel stats-chart-card">
+              <header class="panel-header">
+                <h2>Zadania wg statusu</h2>
+                <span class="pill">Cała firma</span>
+              </header>
+              <div class="stats-task-status" id="statsTaskStatusChart" aria-label="Zadania według statusu"></div>
+            </article>
+            <article class="panel stats-chart-card wide-panel">
+              <header class="panel-header">
+                <div>
+                  <h2>Aktywność firmy - ostatnie 7 dni</h2>
+                  <p id="statsSummary" class="muted">Brak danych do raportu.</p>
+                </div>
+                <span class="pill green">Aktywność</span>
+              </header>
+              <div class="stats-activity-chart" id="statsBarChart" aria-label="Aktywność firmy z ostatnich 7 dni"></div>
+            </article>
+            <article class="panel stats-chart-card wide-panel">
+              <header class="panel-header">
+                <h2>Trend produktywności (6 miesięcy)</h2>
+                <span class="pill amber" id="statsTrendBadge">Wpisy</span>
+              </header>
+              <div class="stats-trend-chart" id="statsTrendChart" aria-label="Trend produktywności z ostatnich 6 miesięcy"></div>
+            </article>
+            <article class="panel stats-chart-card wide-panel">
+              <header class="panel-header">
+                <h2>Raport zespołu</h2>
+                <span class="pill" id="statsTeamCount">0 osób</span>
+              </header>
+              <div class="stats-table-wrap">
+                <table class="stats-table">
+                  <thead>
+                    <tr>
+                      <th>Osoba</th>
+                      <th>Dziś</th>
+                      <th>Tydzień</th>
+                      <th>Miesiąc</th>
+                      <th>Zadania</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsTeamTable"></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="panel stats-chart-card">
+              <header class="panel-header">
+                <h2>Otwarte zgłoszenia</h2>
+                <span class="pill red" id="statsOpenReportsBadge">0</span>
+              </header>
               <div class="issue-list" id="statsIssueList"></div>
             </article>
           </div>
         </section>
 
         <section id="activity" class="view admin-only">
+          <div class="final-page-head">
+            <div>
+              <h2>Historia aktywności</h2>
+              <p>Dziennik akcji użytkowników z wybranego dnia, sortowany według czasu i typu zdarzenia.</p>
+            </div>
+          </div>
           <article class="panel activity-panel">
             <header class="panel-header">
               <div>
@@ -595,6 +789,161 @@
               <div class="empty-state">Brak aktywności dla wybranego dnia.</div>
             </div>
           </article>
+        </section>
+
+        <section id="settings" class="view">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">System</p>
+              <h2>Ustawienia wyglądu</h2>
+            </div>
+            <span class="pill teal" id="settingsUserBadge">Moje konto</span>
+          </div>
+
+          <div class="settings-layout">
+            <article class="panel settings-panel">
+              <header class="panel-header">
+                <h2>Tryb strony</h2>
+                <span class="pill" id="settingsThemeBadge">Jasny</span>
+              </header>
+              <div class="settings-choice-grid" role="radiogroup" aria-label="Tryb strony">
+                <label class="settings-choice">
+                  <input type="radio" name="settingsTheme" value="light" data-settings-theme />
+                  <span class="settings-choice-icon light"></span>
+                  <strong>Jasny</strong>
+                  <small>Przejrzysty widok dzienny</small>
+                </label>
+                <label class="settings-choice">
+                  <input type="radio" name="settingsTheme" value="dark" data-settings-theme />
+                  <span class="settings-choice-icon dark"></span>
+                  <strong>Ciemny</strong>
+                  <small>Spokojniejszy widok wieczorny</small>
+                </label>
+              </div>
+            </article>
+
+            <article class="panel settings-panel">
+              <header class="panel-header">
+                <h2>Kolor wiodący</h2>
+                <span class="pill" id="settingsAccentBadge">Granatowy</span>
+              </header>
+              <div class="settings-color-grid" role="radiogroup" aria-label="Kolor wiodący">
+                <label class="settings-color" data-settings-color="indigo">
+                  <input type="radio" name="settingsAccent" value="indigo" data-settings-accent />
+                  <span class="settings-swatch indigo"></span>
+                  <strong>Granatowy</strong>
+                </label>
+                <label class="settings-color" data-settings-color="blue">
+                  <input type="radio" name="settingsAccent" value="blue" data-settings-accent />
+                  <span class="settings-swatch blue"></span>
+                  <strong>Niebieski</strong>
+                </label>
+                <label class="settings-color" data-settings-color="green">
+                  <input type="radio" name="settingsAccent" value="green" data-settings-accent />
+                  <span class="settings-swatch green"></span>
+                  <strong>Zielony</strong>
+                </label>
+                <label class="settings-color" data-settings-color="red">
+                  <input type="radio" name="settingsAccent" value="red" data-settings-accent />
+                  <span class="settings-swatch red"></span>
+                  <strong>Czerwony</strong>
+                </label>
+              </div>
+            </article>
+
+            <article class="panel settings-preview-panel">
+              <header class="panel-header">
+                <h2>Podgląd</h2>
+                <span class="pill green" id="settingsSaveStatus">Gotowe</span>
+              </header>
+              <div class="settings-preview">
+                <div class="settings-preview-card">
+                  <span class="settings-preview-line"></span>
+                  <strong>PRO-KOM</strong>
+                  <p>Widok dzisiejszych spraw w wybranej kolorystyce.</p>
+                  <button class="primary-button" type="button">Przycisk główny</button>
+                </div>
+                <div class="settings-preview-stack">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel settings-notifications-panel">
+              <header class="panel-header">
+                <h2>Powiadomienia</h2>
+                <span class="pill teal" id="settingsNotificationsBadge">Wszystkie</span>
+              </header>
+              <div class="settings-toggle-list">
+                <label class="settings-toggle">
+                  <input type="checkbox" value="chat" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Wiadomości czatu</strong>
+                    <small>Rozmowy prywatne i grupowe</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="tasks" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Nowe zadania</strong>
+                    <small>Przydziały i zmiany na tablicy zadań</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="inventory" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Niskie stany magazynu</strong>
+                    <small>Braki, towar i zgłoszenia magazynowe</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="reports" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Zgłoszenia</strong>
+                    <small>Nowe i aktualizowane sprawy</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="announcements" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Ogłoszenia</strong>
+                    <small>Pilne wpisy i komentarze</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="time" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Czas pracy</strong>
+                    <small>Grafik, korekty i wnioski</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="calendar" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Kalendarz</strong>
+                    <small>Wydarzenia i RSVP</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="knowledge" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Baza wiedzy</strong>
+                    <small>Dokumenty i zeszyt zmiany</small>
+                  </span>
+                </label>
+              </div>
+            </article>
+          </div>
         </section>
       </main>
     </div>
@@ -704,6 +1053,23 @@
           <button class="primary-button" type="submit">Dodaj wydarzenie</button>
         </menu>
       </form>
+    </dialog>
+
+    <dialog id="calendarDayDialog" class="modal">
+      <article class="modal-content calendar-day-dialog">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Kalendarz</p>
+            <h2 id="calendarDayTitle">Szczegóły dnia</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <p class="note" id="calendarDayMeta"></p>
+        <div class="calendar-day-detail-list" id="calendarDayList"></div>
+        <menu>
+          <button class="primary-button" data-close-dialog type="button">Zamknij</button>
+        </menu>
+      </article>
     </dialog>
 
     <dialog id="knowledgeFormDialog" class="modal">
@@ -960,7 +1326,7 @@
 
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
-    <script src="data.js?v=74"></script>
-    <script src="app.js?v=74"></script>
+    <script src="data.js?v=78"></script>
+    <script src="app.js?v=95"></script>
   </body>
 </html>

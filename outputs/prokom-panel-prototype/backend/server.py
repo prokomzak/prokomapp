@@ -57,6 +57,25 @@ WORK_DAYS = (
 WORK_DAY_KEYS = {key for key, _label in WORK_DAYS}
 WORK_DAY_INDEX = {key: index for index, (key, _label) in enumerate(WORK_DAYS)}
 AUTO_TIME_RECORD_NOTE = "ewidencja_czasu"
+DEFAULT_NOTIFICATION_PREFERENCES = {
+    "chat": True,
+    "tasks": True,
+    "inventory": True,
+    "reports": True,
+    "announcements": True,
+    "time": True,
+    "calendar": True,
+    "knowledge": True,
+    "team": True,
+    "dashboard": True,
+}
+DEFAULT_USER_PREFERENCES = {
+    "theme": "light",
+    "accent": "indigo",
+    "notifications": DEFAULT_NOTIFICATION_PREFERENCES,
+}
+ALLOWED_PREFERENCE_THEMES = {"light", "dark"}
+ALLOWED_PREFERENCE_ACCENTS = {"indigo", "blue", "green", "red"}
 
 SEED_USERS = [
     {
@@ -240,6 +259,35 @@ def session_seconds(row: sqlite3.Row, range_start: datetime, range_end: datetime
     if break_started and not row["ended_at"]:
         break_seconds += seconds_between(break_started, now)
     return max(0, worked - min(worked, break_seconds))
+
+
+def session_time_label(value: str | None) -> str:
+    parsed = parse_iso(value)
+    return parsed.astimezone().strftime("%H:%M") if parsed else ""
+
+
+def time_session_day_log(rows: list[sqlite3.Row], day_start: datetime, now: datetime) -> list[dict]:
+    entries = []
+    for row in rows:
+        started = parse_iso(row["started_at"])
+        ended = parse_iso(row["ended_at"]) or now
+        if not started or ended < day_start or started > now:
+            continue
+        worked_seconds = session_seconds(row, day_start, now, now)
+        break_seconds = int(row["total_break_seconds"] or 0)
+        break_started = parse_iso(row["break_started_at"])
+        if break_started and not row["ended_at"]:
+            break_seconds += seconds_between(break_started, now)
+        entries.append(
+            {
+                "start": session_time_label(row["started_at"]),
+                "end": session_time_label(row["ended_at"]) if row["ended_at"] else "",
+                "status": "W toku" if not row["ended_at"] else "Zakończone",
+                "durationSeconds": worked_seconds,
+                "breakSeconds": max(0, break_seconds),
+            }
+        )
+    return entries
 
 
 def parse_schedule_minutes(value: str | None) -> int | None:
@@ -525,6 +573,45 @@ def ensure_announcement_schema(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE announcements ADD COLUMN {definition}")
 
 
+def ensure_user_preferences_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(user_preferences)").fetchall()}
+    if "notifications_json" not in columns:
+        conn.execute("ALTER TABLE user_preferences ADD COLUMN notifications_json TEXT NOT NULL DEFAULT '{}'")
+        columns.add("notifications_json")
+    table_sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_preferences'"
+    ).fetchone()
+    table_sql = table_sql_row["sql"] if table_sql_row else ""
+    if "'blue'" in table_sql:
+        return
+    conn.execute("ALTER TABLE user_preferences RENAME TO user_preferences_old")
+    conn.execute(
+        """
+        CREATE TABLE user_preferences (
+          user_login TEXT PRIMARY KEY,
+          theme TEXT NOT NULL DEFAULT 'light' CHECK (theme IN ('light', 'dark')),
+          accent TEXT NOT NULL DEFAULT 'indigo' CHECK (accent IN ('indigo', 'blue', 'green', 'red')),
+          notifications_json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO user_preferences(user_login, theme, accent, notifications_json, updated_at)
+        SELECT
+          user_login,
+          CASE WHEN theme IN ('light', 'dark') THEN theme ELSE 'light' END,
+          CASE WHEN accent IN ('indigo', 'blue', 'green', 'red') THEN accent ELSE 'indigo' END,
+          COALESCE(notifications_json, '{}'),
+          COALESCE(updated_at, CURRENT_TIMESTAMP)
+        FROM user_preferences_old
+        """
+    )
+    conn.execute("DROP TABLE user_preferences_old")
+
+
 def migrate_knowledge_content(conn: sqlite3.Connection) -> None:
     already_done = conn.execute(
         "SELECT value FROM database_meta WHERE key = ?",
@@ -693,6 +780,15 @@ def initialize_database() -> None:
               permission TEXT NOT NULL,
               granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               PRIMARY KEY (user_login, permission),
+              FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS user_preferences (
+              user_login TEXT PRIMARY KEY,
+              theme TEXT NOT NULL DEFAULT 'light' CHECK (theme IN ('light', 'dark')),
+              accent TEXT NOT NULL DEFAULT 'indigo' CHECK (accent IN ('indigo', 'blue', 'green', 'red')),
+              notifications_json TEXT NOT NULL DEFAULT '{}',
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
             );
 
@@ -1015,7 +1111,7 @@ def initialize_database() -> None:
             "database_role": "LAN server local file",
             "planned_lan_ip": "192.168.1.101",
             "backend": "python-standard-library",
-            "schema_version": "19",
+            "schema_version": "22",
         }
         for key, value in meta.items():
             conn.execute(
@@ -1026,6 +1122,7 @@ def initialize_database() -> None:
         ensure_knowledge_schema(conn)
         ensure_report_schema(conn)
         ensure_announcement_schema(conn)
+        ensure_user_preferences_schema(conn)
         for user in SEED_USERS:
             existing = conn.execute("SELECT login FROM users WHERE login = ?", (user["login"],)).fetchone()
             if existing:
@@ -1418,6 +1515,43 @@ def account_payload(row: sqlite3.Row) -> dict:
     }
 
 
+def normalize_user_preferences(payload: dict | None) -> dict:
+    source = payload if isinstance(payload, dict) else {}
+    theme = str(source.get("theme") or DEFAULT_USER_PREFERENCES["theme"]).strip().lower()
+    accent = str(source.get("accent") or DEFAULT_USER_PREFERENCES["accent"]).strip().lower()
+    raw_notifications = source.get("notifications")
+    notifications = dict(DEFAULT_NOTIFICATION_PREFERENCES)
+    if isinstance(raw_notifications, dict):
+        for key, fallback in DEFAULT_NOTIFICATION_PREFERENCES.items():
+            if key in raw_notifications:
+                notifications[key] = bool(raw_notifications.get(key, fallback))
+    return {
+        "theme": theme if theme in ALLOWED_PREFERENCE_THEMES else DEFAULT_USER_PREFERENCES["theme"],
+        "accent": accent if accent in ALLOWED_PREFERENCE_ACCENTS else DEFAULT_USER_PREFERENCES["accent"],
+        "notifications": notifications,
+    }
+
+
+def user_preferences_payload(conn: sqlite3.Connection, login: str) -> dict:
+    row = conn.execute(
+        "SELECT theme, accent, notifications_json FROM user_preferences WHERE user_login = ?",
+        (login,),
+    ).fetchone()
+    if not row:
+        return normalize_user_preferences(DEFAULT_USER_PREFERENCES)
+    try:
+        notifications = json.loads(row["notifications_json"] or "{}")
+    except json.JSONDecodeError:
+        notifications = {}
+    return normalize_user_preferences({"theme": row["theme"], "accent": row["accent"], "notifications": notifications})
+
+
+def account_payload_with_preferences(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    payload = account_payload(row)
+    payload["preferences"] = user_preferences_payload(conn, row["login"])
+    return payload
+
+
 def presence_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     rows = conn.execute("SELECT * FROM user_presence").fetchall()
     return {row["user_login"]: row for row in rows}
@@ -1737,6 +1871,7 @@ def time_summary(conn: sqlite3.Connection, user: sqlite3.Row, schedule_week_star
     }
     working_now = sum(1 for stat in people_stats if stat["state"] == "work")
     break_now = sum(1 for stat in people_stats if stat["state"] == "break")
+    personal_day_log = time_session_day_log(sessions_by_user.get(user["login"], []), today_start, now)
 
     return {
         "personal": next(
@@ -1746,11 +1881,12 @@ def time_summary(conn: sqlite3.Connection, user: sqlite3.Row, schedule_week_star
                     "weekSeconds": stat["weekSeconds"],
                     "monthSeconds": stat["monthSeconds"],
                     "scheduledMonthSeconds": stat["scheduledMonthSeconds"],
+                    "dayLog": personal_day_log,
                 }
                 for stat in people_stats
                 if stat["login"] == user["login"]
             ),
-            {"todaySeconds": 0, "weekSeconds": 0, "monthSeconds": 0, "scheduledMonthSeconds": 0},
+            {"todaySeconds": 0, "weekSeconds": 0, "monthSeconds": 0, "scheduledMonthSeconds": 0, "dayLog": personal_day_log},
         ),
         "pulse": {
             "workingNow": working_now,
@@ -2371,7 +2507,14 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if not user:
                         self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
                         return
-                    self.send_json({"user": account_payload(user)})
+                    self.send_json({"user": account_payload_with_preferences(conn, user)})
+                    return
+                if path == "/api/me/preferences" and method in ("POST", "PATCH"):
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.update_user_preferences(conn, user)
                     return
                 if path == "/api/time/summary" and method == "GET":
                     user = self.current_user(conn)
@@ -2724,11 +2867,37 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (user["login"],),
         )
         self.send_json(
-            {"user": account_payload(user)},
+            {"user": account_payload_with_preferences(conn, user)},
             extra_headers={
                 "Set-Cookie": f"{SESSION_COOKIE}={make_session(user['login'])}; Path=/; Max-Age={SESSION_TTL}; HttpOnly; SameSite=Lax"
             },
         )
+
+    def update_user_preferences(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
+        preferences = normalize_user_preferences(self.read_json())
+        conn.execute(
+            """
+            INSERT INTO user_preferences(user_login, theme, accent, notifications_json, updated_at)
+            VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(user_login) DO UPDATE SET
+              theme = excluded.theme,
+              accent = excluded.accent,
+              notifications_json = excluded.notifications_json,
+              updated_at = excluded.updated_at
+            """,
+            (
+                user["login"],
+                preferences["theme"],
+                preferences["accent"],
+                json.dumps(preferences["notifications"], ensure_ascii=False),
+                now_text(),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'UPDATE_PREFERENCES', ?)",
+            (user["login"], json.dumps(preferences, ensure_ascii=False)),
+        )
+        self.send_json({"ok": True, "preferences": preferences, "user": account_payload_with_preferences(conn, user)})
 
     def update_presence(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
         payload = self.read_json()
@@ -3116,7 +3285,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
             {
                 "ok": True,
                 "changedLogin": target_login,
-                "user": account_payload(conn.execute("SELECT * FROM users WHERE login = ?", (target_login,)).fetchone()),
+                "user": account_payload_with_preferences(conn, conn.execute("SELECT * FROM users WHERE login = ?", (target_login,)).fetchone()),
                 **snapshot(conn),
             }
         )
