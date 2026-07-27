@@ -1073,6 +1073,22 @@ def initialize_database() -> None:
               FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS inventory_items (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              sku TEXT NOT NULL DEFAULT '',
+              category TEXT NOT NULL DEFAULT 'Towar',
+              location TEXT NOT NULL DEFAULT '',
+              quantity REAL NOT NULL DEFAULT 0,
+              unit TEXT NOT NULL DEFAULT 'szt.',
+              minimum REAL NOT NULL DEFAULT 0,
+              owner_login TEXT,
+              owner_name TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (owner_login) REFERENCES users(login) ON DELETE SET NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
             CREATE INDEX IF NOT EXISTS idx_users_role ON users(app_role);
             CREATE INDEX IF NOT EXISTS idx_permissions_permission ON user_permissions(permission);
@@ -1098,6 +1114,7 @@ def initialize_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_calendar_rsvps_user ON calendar_rsvps(user_login, created_at);
             CREATE INDEX IF NOT EXISTS idx_knowledge_articles_created ON knowledge_articles(created_at);
             CREATE INDEX IF NOT EXISTS idx_handover_notes_created ON handover_notes(created_at);
+            CREATE INDEX IF NOT EXISTS idx_inventory_items_status ON inventory_items(quantity, minimum, updated_at);
             CREATE INDEX IF NOT EXISTS idx_handover_accepts_user ON handover_accepts(user_login, accepted_at);
             CREATE INDEX IF NOT EXISTS idx_weekly_kudos_week ON weekly_kudos(week_start, created_at);
             CREATE INDEX IF NOT EXISTS idx_weekly_kudos_recipient ON weekly_kudos(recipient_login, week_start);
@@ -2089,6 +2106,45 @@ def requests_snapshot(conn: sqlite3.Connection) -> dict:
     return {"requests": [request_payload(row) for row in rows]}
 
 
+def inventory_status(quantity: float, minimum: float) -> str:
+    if minimum > 0 and quantity <= minimum:
+        return "Niski"
+    if minimum > 0 and quantity <= minimum * 1.5:
+        return "Uwaga"
+    return "OK"
+
+
+def inventory_item_payload(row: sqlite3.Row) -> dict:
+    quantity = float(row["quantity"] or 0)
+    minimum = float(row["minimum"] or 0)
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "sku": row["sku"] or "",
+        "category": row["category"] or "Towar",
+        "location": row["location"] or "",
+        "quantity": quantity,
+        "unit": row["unit"] or "szt.",
+        "minimum": minimum,
+        "status": inventory_status(quantity, minimum),
+        "owner": row["owner_name"] or "",
+        "ownerLogin": row["owner_login"] or "",
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def inventory_snapshot(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM inventory_items
+        ORDER BY updated_at DESC, created_at DESC, name COLLATE NOCASE
+        """
+    ).fetchall()
+    return {"items": [inventory_item_payload(row) for row in rows]}
+
+
 def calendar_event_payload(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row) -> dict:
     attendee_count = conn.execute(
         "SELECT COUNT(*) AS count FROM calendar_rsvps WHERE event_id = ?",
@@ -2677,6 +2733,20 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if method == "PATCH":
                         self.update_request(conn, user, request_id)
                         return
+                if path == "/api/inventory" and method == "GET":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.send_json(inventory_snapshot(conn))
+                    return
+                if path == "/api/inventory" and method == "POST":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.create_inventory_item(conn, user)
+                    return
                 if path == "/api/calendar" and method == "GET":
                     user = self.current_user(conn)
                     if not user:
@@ -3846,6 +3916,61 @@ class ProkomHandler(BaseHTTPRequestHandler):
             conn.execute("SELECT * FROM employee_requests WHERE id = ?", (request_id,)).fetchone()
         )
         self.send_json(response)
+
+    def create_inventory_item(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
+        payload = self.read_json()
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            self.send_json({"error": "Podaj nazwe towaru."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        def read_float(field: str, fallback: float = 0.0) -> float:
+            raw = payload.get(field, fallback)
+            if isinstance(raw, str):
+                raw = raw.replace(",", ".").strip()
+            try:
+                return max(0.0, float(raw))
+            except (TypeError, ValueError):
+                return fallback
+
+        item_id = f"inventory-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        sku = str(payload.get("sku", "")).strip()[:80]
+        category = str(payload.get("category", "")).strip()[:80] or "Towar"
+        location = str(payload.get("location", "")).strip()[:120]
+        unit = str(payload.get("unit", "")).strip()[:24] or "szt."
+        quantity = read_float("quantity")
+        minimum = read_float("minimum")
+        conn.execute(
+            """
+            INSERT INTO inventory_items(
+              id, name, sku, category, location, quantity, unit, minimum, owner_login, owner_name, created_at, updated_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item_id,
+                name,
+                sku,
+                category,
+                location,
+                quantity,
+                unit,
+                minimum,
+                user["login"],
+                user["display_name"],
+                now_text(),
+                now_text(),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_INVENTORY_ITEM', ?)",
+            (user["login"], item_id),
+        )
+        response = inventory_snapshot(conn)
+        response["item"] = inventory_item_payload(
+            conn.execute("SELECT * FROM inventory_items WHERE id = ?", (item_id,)).fetchone()
+        )
+        self.send_json(response, HTTPStatus.CREATED)
 
     def create_calendar_event(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
         payload = self.read_json()

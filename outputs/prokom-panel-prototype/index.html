@@ -6,13 +6,13 @@
     <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=97" />
+    <link rel="stylesheet" href="styles.css?v=108" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
       <div class="login-card">
         <div class="brand login-brand">
-          <div class="brand-mark">PK</div>
+          <div class="brand-mark logo">PK</div>
           <div>
             <strong>PRO-KOM</strong>
             <span>Panel firmowy</span>
@@ -38,39 +38,83 @@
       </div>
     </section>
 
-    <div class="app-shell hidden" id="appShell">
+    <div class="app-shell app hidden" id="appShell">
       <aside class="sidebar" aria-label="Nawigacja">
         <div class="brand">
-          <div class="brand-mark">PK</div>
+          <div class="brand-mark logo">PK</div>
           <div>
             <strong>PRO-KOM</strong>
             <span>Panel firmowy</span>
           </div>
         </div>
 
-        <nav class="nav-list">
-          <span class="nav-section" data-nav-section="overview">Przegląd</span>
-          <span class="nav-section" data-nav-section="work">Praca</span>
-          <span class="nav-section" data-nav-section="communication">Komunikacja</span>
-          <span class="nav-section" data-nav-section="company">Firma</span>
-          <span class="nav-section" data-nav-section="system">System</span>
-          <button class="nav-item active" data-view="dashboard">Tablica</button>
-          <button class="nav-item" data-view="announcements">Ogłoszenia</button>
-          <button class="nav-item" data-view="tasks">Zadania</button>
-          <button class="nav-item" data-view="time">Czas pracy</button>
-          <button class="nav-item" data-view="calendar">Kalendarz</button>
-          <button class="nav-item" data-view="reports">Zgłoszenia</button>
-          <button class="nav-item" data-view="chat">Czat</button>
-          <button class="nav-item" data-view="knowledge">Wiedza</button>
-          <button class="nav-item" data-view="team">Zespół</button>
-          <button class="nav-item admin-only" data-view="stats">Statystyki</button>
-          <button class="nav-item admin-only" data-view="activity">Historia</button>
-          <button class="nav-item" data-view="settings">Ustawienia</button>
+        <nav class="nav-list nav">
+          <span class="nav-section nav-label" data-nav-section="overview">Przegląd</span>
+          <button class="nav-item active" data-view="dashboard" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+            <span>Pulpit</span>
+          </button>
+          <button class="nav-item" data-view="stats" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+            <span>Raporty</span>
+          </button>
+
+          <span class="nav-section nav-label" data-nav-section="work">Praca</span>
+          <button class="nav-item" data-view="tasks" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span>Zadania</span>
+          </button>
+          <button class="nav-item" data-view="time" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            <span>Czas pracy</span>
+          </button>
+          <button class="nav-item" data-view="leaves" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 8c0-3-2-5-5-5S7 5 7 8M4 20h16M6 20l1.5-9h9L18 20"/></svg>
+            <span>Urlopy</span>
+          </button>
+          <button class="nav-item" data-view="calendar" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
+            <span>Kalendarz</span>
+          </button>
+
+          <span class="nav-section nav-label" data-nav-section="communication">Komunikacja</span>
+          <button class="nav-item" data-view="announcements" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 11l14-7v16L3 13v-2zM3 11v2M17 8a4 4 0 0 1 0 8"/></svg>
+            <span>Ogłoszenia</span>
+          </button>
+          <button class="nav-item" data-view="chat" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg>
+            <span>Czat</span>
+          </button>
+          <button class="nav-item" data-view="reports" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+            <span>Zgłoszenia</span>
+          </button>
+
+          <span class="nav-section nav-label" data-nav-section="company">Firma</span>
+          <button class="nav-item" data-view="inventory" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-6 9 6v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 21V12h6v9"/></svg>
+            <span>Magazyn</span>
+          </button>
+          <button class="nav-item" data-view="knowledge" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M14 3v5h5"/></svg>
+            <span>Dokumenty</span>
+          </button>
+          <button class="nav-item" data-view="team" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M17 4.5a3.2 3.2 0 0 1 0 6M21.5 20a6.2 6.2 0 0 0-4-5.8"/></svg>
+            <span>Zespół</span>
+          </button>
+
+          <span class="nav-section nav-label" data-nav-section="system">System</span>
+          <button class="nav-item" data-view="settings" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6h.1A1.6 1.6 0 0 0 9 1.1V1a2 2 0 0 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H23a2 2 0 0 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+            <span>Ustawienia</span>
+          </button>
         </nav>
 
-        <div class="sidebar-footer">
-          <div class="account-card">
-            <div class="avatar" id="currentUserAvatar">SZ</div>
+        <div class="sidebar-footer side-foot">
+          <div class="account-card usercard">
+            <div class="avatar av" id="currentUserAvatar">SZ</div>
             <div>
               <strong id="currentUserName">Tadeusz</strong>
               <span id="currentUserRole">admin</span>
@@ -90,40 +134,60 @@
 
       <main class="main">
         <header class="topbar">
-          <button class="mobile-menu" id="menuToggle" type="button" aria-label="Menu">☰</button>
-          <div>
+          <button class="burger mobile-menu" id="menuToggle" type="button" aria-label="Menu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+          </button>
+          <form class="topbar-search search" id="globalSearchForm" role="search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg>
+            <input id="globalSearchInput" type="search" placeholder="Szukaj wszędzie — zadania, osoby, dokumenty, towar..." aria-label="Szukaj wszędzie" />
+            <kbd>Ctrl K</kbd>
+            <button class="search-button" type="submit">Szukaj</button>
+          </form>
+          <div class="source-hidden-title">
             <p class="eyebrow" id="todayLabel">Dzisiaj</p>
-            <h1 id="viewTitle">Tablica dnia</h1>
+            <h1 id="viewTitle">Pulpit</h1>
           </div>
-          <div class="topbar-actions">
-            <form class="topbar-search" id="globalSearchForm" role="search">
-              <input id="globalSearchInput" type="search" placeholder="Szukaj w panelu..." aria-label="Szukaj w panelu" />
-              <button class="search-button" type="submit">Szukaj</button>
-            </form>
-            <div class="topbar-work-counter" id="topbarWorkCounter" data-clock-state="out" aria-label="Dzisiejszy czas pracy">
-              <span>Dziś</span>
+          <div class="topbar-actions top-actions">
+            <div class="source-add-wrap">
+              <button class="add-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+                Dodaj
+              </button>
+              <div class="menu source-add-menu">
+                <button data-quick-announcement type="button"><span class="mi a">+</span>Nowe ogłoszenie</button>
+                <button data-open-task-form type="button"><span class="mi w">✓</span>Nowe zadanie</button>
+                <button data-quick-report type="button"><span class="mi d">!</span>Nowe zgłoszenie</button>
+                <button data-open-calendar-form type="button"><span class="mi p">+</span>Nowe wydarzenie</button>
+              </div>
+            </div>
+            <div class="status-pill topbar-work-counter" id="topbarWorkCounter" data-clock-state="out" aria-label="Dzisiejszy czas pracy">
+              <span class="p"></span>
+              <span id="topbarWorkState">Dziś</span>
               <strong id="topbarWorkTimer">00:00:00</strong>
             </div>
-            <button class="bell" id="notificationsButton" type="button" aria-label="Powiadomienia">
-              <span class="bell-icon" aria-hidden="true">@</span>
+            <button class="bell icon-btn" id="notificationsButton" type="button" aria-label="Powiadomienia">
+              <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>
               <span class="bell-indicator" aria-hidden="true"></span>
-              <span>●</span>
               <strong>7</strong>
             </button>
+            <div class="usercard topbar-usercard">
+              <div class="av" id="topbarUserAvatar">TA</div>
+            </div>
           </div>
         </header>
 
         <section id="dashboard" class="view active-view">
-          <div class="day-strip">
+          <div class="page-head source-dashboard-head">
             <div>
-              <p class="eyebrow" id="dashboardGreeting">Dzień dobry</p>
-              <h2>Najważniejsze sprawy na dziś</h2>
+              <h1 id="dashboardGreeting">Dzień dobry</h1>
+              <p id="dashboardSubline">Poniedziałek, 27 lipca 2026 · 2 nowe ogłoszenia, 1 do potwierdzenia.</p>
             </div>
-            <div class="clock-card" data-clock-state="out">
-              <span id="clockStatus">Niewbity</span>
-              <strong id="liveTimer">00:00:00</strong>
-              <button id="clockButton" class="primary-button" type="button">Wbijam się</button>
-              <button id="breakButton" class="secondary-button" type="button" disabled>Przerwa</button>
+            <div class="source-head-actions">
+              <button class="btn btn-ghost secondary-button" data-quick-report type="button">Zgłoś problem</button>
+              <button class="btn btn-primary primary-button" data-quick-announcement type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                Nowe ogłoszenie
+              </button>
             </div>
           </div>
 
@@ -132,94 +196,97 @@
             <span></span>
           </button>
 
-          <div class="dashboard-grid" id="dashboardGrid">
-            <article class="widget wide feature-feed-widget" draggable="true">
-              <header class="widget-header">
-                <h3>Tablica</h3>
-                <div class="feed-controls">
-                  <div class="segmented">
-                    <button class="active" data-feed-filter="all" type="button">Wszystkie</button>
-                    <button data-feed-filter="boss" type="button">Od szefa</button>
-                    <button data-feed-filter="unread" type="button">Do uwagi</button>
-                  </div>
-                  <label class="feed-type-filter">Typ
-                    <select id="feedTypeFilter"></select>
-                  </label>
+          <div class="two source-dashboard-grid" id="dashboardGrid">
+            <article class="card feature-feed-widget" draggable="true">
+              <div class="card-h">
+                <h3>📌 Tablica ogłoszeń</h3>
+                <div class="chips" id="annFilter">
+                  <button class="chip on active" data-feed-filter="all" type="button">Wszystkie</button>
+                  <button class="chip" data-feed-filter="urgent" type="button">Pilne</button>
+                  <button class="chip" data-feed-filter="boss" type="button">Ważne</button>
+                  <button class="chip" data-feed-filter="mine" type="button">Moje</button>
+                  <button class="chip" data-feed-filter="unread" type="button">Nieprzeczytane</button>
                 </div>
-              </header>
-              <div class="quick-board-actions" aria-label="Szybkie dodawanie">
-                <button class="secondary-button" data-quick-report type="button">Dodaj zgłoszenie</button>
-                <button class="secondary-button" data-quick-announcement type="button">Dodaj ogłoszenie</button>
               </div>
-              <div class="feed-list" id="feedList"></div>
+              <div class="card-b">
+                <div class="composer" id="dashboardComposer">
+                  <button class="trigger" data-quick-announcement type="button">
+                    <div class="av" id="announcementComposerAvatar">TA</div>
+                    <div class="ph">Napisz ogłoszenie do zespołu...</div>
+                  </button>
+                </div>
+                <div class="source-pinbar">📌 PRZYPIĘTE <span></span></div>
+                <div class="feed-list feed" id="feedList"></div>
+                <select class="source-hidden-control" id="feedTypeFilter" aria-hidden="true"></select>
+              </div>
             </article>
 
+            <div class="w source-side-column">
+              <article class="card">
+                <div class="card-h">
+                  <h3>Mój czas dziś</h3>
+                  <span class="status-pill"><span class="p"></span><span id="clockStatus">Niewbity</span></span>
+                </div>
+                <div class="card-b">
+                  <div class="mini-time">
+                    <div class="clock" id="liveTimer">00:00:00</div>
+                    <div class="source-clock-meta">Start 09:02 · Przerwa 24m · cel 8h</div>
+                  </div>
+                  <div class="source-clock-actions">
+                    <button id="breakButton" class="btn btn-ghost secondary-button" type="button" disabled>☕ Przerwa</button>
+                    <button id="clockButton" class="btn btn-primary primary-button" type="button">Wbijam się</button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card-h"><h3>Wymaga uwagi</h3></div>
+                <div class="card-b">
+                  <div class="people source-attention-list">
+                    <div class="person"><div class="av source-warning">2</div><div><div class="n">Zadania na jutro</div><div class="r">Raport wysyłek, cennik</div></div><button class="stat off" data-view-shortcut="tasks" type="button">Otwórz</button></div>
+                    <div class="person"><div class="av source-danger">!</div><div><div class="n">Niski stan: folia</div><div class="r">8 szt. (min. 20)</div></div><button class="stat off" data-view-shortcut="reports" type="button">Otwórz</button></div>
+                    <div class="person"><div class="av source-info">1</div><div><div class="n">Zgłoszenie oczekuje</div><div class="r">Braki towaru</div></div><button class="stat off" data-view-shortcut="reports" type="button">Otwórz</button></div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card-h"><h3>Nadchodzące</h3></div>
+                <div class="card-b">
+                  <ol class="timeline source-events" id="dashboardUpcomingList">
+                    <li class="empty-state">Brak nadchodzących wydarzeń.</li>
+                  </ol>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card-h">
+                  <h3>Kto jest w pracy</h3>
+                  <span class="pill" id="peopleTodayCount">0 osób</span>
+                </div>
+                <div class="card-b"><div class="people-list people" id="peopleToday"></div></div>
+              </article>
+            </div>
+          </div>
+
+          <div class="source-backend-hidden" aria-hidden="true">
             <article class="widget wide" draggable="true">
-              <header class="widget-header">
-                <h3>Mój dzień</h3>
-                <span class="pill green" id="myDayCount">0 z 0</span>
-              </header>
+              <span class="pill green" id="myDayCount">0 z 0</span>
               <div class="checklist" id="myDayList"></div>
               <form class="inline-add-form" id="myDayForm">
-                <input id="myDayInput" type="text" placeholder="Dodaj wpis do mojego dnia" />
+                <input id="myDayInput" type="text" />
                 <button class="secondary-button" type="submit">Dodaj</button>
               </form>
             </article>
-
-            <article class="widget dashboard-chat-widget" draggable="true">
-              <header class="widget-header">
-                <h3>Ostatnie czaty</h3>
-                <span class="pill" id="dashboardChatBadge">0 nowych</span>
-              </header>
-              <div class="recent-chat-list" id="dashboardRecentChats"></div>
-            </article>
-
-            <article class="widget">
-              <header class="widget-header">
-                <h3>Kto dziś pracuje</h3>
-                <span class="pill" id="peopleTodayCount">0 osób</span>
-              </header>
-              <div class="people-list" id="peopleToday"></div>
-            </article>
-
-            <article class="widget admin-widget">
-              <header class="widget-header">
-                <h3>Do decyzji</h3>
-                <span class="pill red" id="decisionCount">3</span>
-              </header>
-              <div class="decision-list" id="decisionList"></div>
-            </article>
-
-            <article class="widget">
-              <header class="widget-header">
-                <h3>Nadchodzące</h3>
-                <span class="pill teal">3 dni</span>
-              </header>
-              <ol class="timeline" id="dashboardUpcomingList">
-                <li class="empty-state">Brak nadchodzących wydarzeń.</li>
-              </ol>
-            </article>
-
-            <article class="widget kudos-widget">
-              <header class="widget-header">
-                <h3>Wyróżnienia tygodnia</h3>
-                <div class="panel-actions">
-                  <span class="pill violet" id="kudosCount">0</span>
-                  <button class="secondary-button" id="addKudosButton" type="button">Dodaj</button>
-                </div>
-              </header>
-              <div class="kudos-list" id="kudosList">
-                <div class="empty-state">Brak wyróżnień w tym tygodniu.</div>
-              </div>
-            </article>
-
-            <article class="widget quick-poll-widget">
-              <header class="widget-header">
-                <h3>Szybkie ankiety</h3>
-                <button class="secondary-button" id="addPollButton" type="button">Dodaj</button>
-              </header>
-              <div id="quickPollBox"></div>
-            </article>
+            <span id="dashboardChatBadge">0 nowych</span>
+            <div id="dashboardRecentChats"></div>
+            <span id="decisionCount">0</span>
+            <div id="decisionList"></div>
+            <span id="kudosCount">0</span>
+            <button id="addKudosButton" type="button">Dodaj</button>
+            <div id="kudosList"></div>
+            <button id="addPollButton" type="button">Dodaj</button>
+            <div id="quickPollBox"></div>
           </div>
         </section>
 
@@ -301,33 +368,40 @@
         </section>
 
         <section id="time" class="view">
-          <div class="final-page-head">
+          <div class="page-head time-source-head">
             <div>
-              <h2>Czas pracy</h2>
-              <p>Ewidencja, grafik zespołu, tygodnie kalendarzowe, wnioski i kalkulator stawek.</p>
+              <h1>Czas pracy</h1>
+              <p>Ewidencja i grafik zespołu · <span data-schedule-week-label>Obecny tydzień</span></p>
+            </div>
+            <div class="time-head-actions">
+              <button class="btn btn-ghost" data-time-week-jump="prev" type="button">‹ Poprzedni</button>
+              <label class="week-picker source-week-picker">Tydzień<input data-time-week-input type="week" /></label>
+              <button class="btn btn-ghost" data-time-week-jump="current" type="button">Bieżący</button>
+              <button class="btn btn-ghost" data-time-week-jump="next" type="button">Następny ›</button>
+              <button class="btn btn-primary admin-only" data-time-export type="button">Eksport CSV</button>
             </div>
           </div>
-          <div class="time-grid">
-            <section class="time-kpi-strip" aria-label="Podsumowanie czasu pracy">
-              <article class="time-kpi-card">
-                <span>Dziś</span>
-                <strong id="timeTodayTile">0h 00m</strong>
-                <small>Obecność dnia</small>
+          <div class="time-grid source-time-layout">
+            <section class="kpis time-kpi-strip source-time-kpis" aria-label="Podsumowanie czasu pracy">
+              <article class="kpi time-kpi-card">
+                <div class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+                <div class="lbl">Dziś</div>
+                <div class="val" id="timeTodayTile">0h 00m</div>
               </article>
-              <article class="time-kpi-card">
-                <span>Tydzień</span>
-                <strong id="timeWeekTile">0h 00m</strong>
-                <small>Obecny tydzień</small>
+              <article class="kpi time-kpi-card">
+                <div class="ic i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/></svg></div>
+                <div class="lbl">Ten tydzień</div>
+                <div class="val" id="timeWeekTile">0h 00m</div>
               </article>
-              <article class="time-kpi-card">
-                <span>Miesiąc</span>
-                <strong id="timeMonthTile">0h 00m</strong>
-                <small>Obecny miesiąc</small>
+              <article class="kpi time-kpi-card">
+                <div class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/></svg></div>
+                <div class="lbl">Miesiąc</div>
+                <div class="val" id="timeMonthTile">0h 00m</div>
               </article>
-              <article class="time-kpi-card accent">
-                <span>Nadgodziny</span>
-                <strong id="timeOvertimeTile">0h 00m</strong>
-                <small>Powyżej grafiku</small>
+              <article class="kpi time-kpi-card accent">
+                <div class="ic w"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></div>
+                <div class="lbl">Nadgodziny</div>
+                <div class="val" id="timeOvertimeTile">0h 00m</div>
               </article>
             </section>
 
@@ -381,7 +455,7 @@
 
             <article class="panel wide-panel">
               <header class="panel-header">
-                <h2>Grafik pracy</h2>
+                <h2>Grafik pracy zespołu</h2>
                 <div class="panel-actions schedule-tools">
                   <button class="secondary-button" id="schedulePrevWeek" type="button">Poprzedni</button>
                   <label class="week-picker">Tydzień<input id="scheduleWeekInput" type="week" /></label>
@@ -418,34 +492,91 @@
               </div>
             </article>
 
-            <form class="panel form-panel" id="leaveForm">
-              <header class="panel-header">
-                <h2>Wniosek urlopowy</h2>
-                <span class="pill">Obieg akceptacji</span>
-              </header>
-              <div class="form-row">
-                <label>Od<input id="leaveFrom" type="date" /></label>
-                <label>Do<input id="leaveTo" type="date" /></label>
-              </div>
-              <label>Typ
-                <select id="leaveType">
-                  <option>Urlop wypoczynkowy</option>
-                  <option>Urlop na żądanie</option>
-                  <option>L4</option>
-                  <option>Wyjście prywatne</option>
-                </select>
-              </label>
-              <label>Komentarz<textarea id="leaveComment" rows="3"></textarea></label>
-              <button class="primary-button" type="submit">Wyślij wniosek</button>
-            </form>
-
             <article class="panel">
               <header class="panel-header">
-                <h2>Wnioski i korekty</h2>
-                <span class="pill amber">Oczekujące</span>
+                <h2>Korekty czasu</h2>
+                <span class="pill amber">Do sprawdzenia</span>
               </header>
               <div class="request-list" id="requestList"></div>
             </article>
+          </div>
+        </section>
+
+        <section id="leaves" class="view">
+          <div class="page-head leaves-page-head">
+            <div>
+              <h1>Urlopy i nieobecności</h1>
+              <p>Składaj wnioski i śledź stan wykorzystania dni wolnych.</p>
+            </div>
+            <button class="btn btn-primary" data-focus-leave-form type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              Nowy wniosek
+            </button>
+          </div>
+          <div class="kpis leaves-kpis">
+            <article class="kpi">
+              <div class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="lbl">Dostępne dni</div>
+              <div class="val" id="leaveAvailableDays">26</div>
+              <div class="trend up" id="leaveAvailableNote">z 26</div>
+            </article>
+            <article class="kpi">
+              <div class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="lbl">Wykorzystane</div>
+              <div class="val" id="leaveUsedDays">0</div>
+            </article>
+            <article class="kpi">
+              <div class="ic w"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+              <div class="lbl">Oczekujące</div>
+              <div class="val" id="leavePendingCount">0</div>
+              <div class="trend down">do akceptacji</div>
+            </article>
+            <article class="kpi">
+              <div class="ic i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg></div>
+              <div class="lbl">Na żądanie</div>
+              <div class="val" id="leaveOnDemandDays">0</div>
+              <div class="trend up">z 4</div>
+            </article>
+          </div>
+          <div class="two leaves-layout">
+            <article class="card leaves-table-card">
+              <div class="card-h">
+                <h3>Wnioski zespołu</h3>
+                <div class="chips">
+                  <button class="chip on" data-leave-filter="all" type="button">Wszystkie</button>
+                  <button class="chip" data-leave-filter="pending" type="button">Oczekujące</button>
+                  <button class="chip" data-leave-filter="mine" type="button">Moje</button>
+                </div>
+              </div>
+              <div class="card-b leaves-table-wrap">
+                <table class="tbl leaves-table">
+                  <thead>
+                    <tr><th>Osoba</th><th>Typ</th><th>Termin</th><th>Dni</th><th>Status</th><th></th></tr>
+                  </thead>
+                  <tbody id="leaveRequestList"></tbody>
+                </table>
+              </div>
+            </article>
+            <form class="card form-panel leaves-form-card" id="leaveForm">
+              <div class="card-h"><h3>Nowy wniosek</h3></div>
+              <div class="card-b">
+                <div class="field">
+                  <label>Typ nieobecności</label>
+                  <select id="leaveType">
+                    <option>Urlop wypoczynkowy</option>
+                    <option>Urlop na żądanie</option>
+                    <option>Zwolnienie lekarskie</option>
+                    <option>Urlop okolicznościowy</option>
+                  </select>
+                </div>
+                <div class="two-eq leave-date-row">
+                  <div class="field"><label>Od</label><input id="leaveFrom" type="date" /></div>
+                  <div class="field"><label>Do</label><input id="leaveTo" type="date" /></div>
+                </div>
+                <div class="field"><label>Komentarz</label><textarea id="leaveComment" rows="3" placeholder="Opcjonalnie…"></textarea></div>
+                <button class="btn btn-primary leaves-submit" type="submit">Wyślij wniosek</button>
+              </div>
+            </form>
           </div>
         </section>
 
@@ -550,6 +681,69 @@
                 </div>
               </form>
             </article>
+          </div>
+        </section>
+
+        <section id="inventory" class="view">
+          <div class="page-head inventory-page-head">
+            <div>
+              <h1>Magazyn</h1>
+              <p>Stany magazynowe z alertami o niskich poziomach i historią ruchów.</p>
+            </div>
+            <div class="inventory-head-actions">
+              <button class="secondary-button" id="receiveInventoryButton" type="button">Przyjęcie</button>
+              <button class="primary-button" id="addInventoryButton" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                Dodaj towar
+              </button>
+            </div>
+          </div>
+          <div class="kpis inventory-kpis">
+            <div class="kpi">
+              <div class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-6 9 6v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg></div>
+              <div class="lbl">Pozycji</div>
+              <div class="val" id="inventoryTotalItems">0</div>
+            </div>
+            <div class="kpi">
+              <div class="ic d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div>
+              <div class="lbl">Niskie stany</div>
+              <div class="val" id="inventoryLowItems">0</div>
+              <div class="trend down" id="inventoryLowTrend">pod kontrolą</div>
+            </div>
+            <div class="kpi">
+              <div class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div class="lbl">Dostępne</div>
+              <div class="val" id="inventoryAvailableItems">0</div>
+            </div>
+            <div class="kpi">
+              <div class="ic i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M21 3l-9 9M8 21H3v-5M3 21l9-9"/></svg></div>
+              <div class="lbl">Ruchy dziś</div>
+              <div class="val" id="inventoryTodayMoves">0</div>
+            </div>
+          </div>
+          <div class="card inventory-stock-card">
+            <div class="card-h">
+              <h3>Stany magazynowe</h3>
+              <div class="inventory-card-tools">
+                <div class="chips inventory-filter-chips">
+                  <button class="chip on" data-inventory-filter-button="all" type="button">Wszystkie</button>
+                  <button class="chip" data-inventory-filter-button="low" type="button">Niskie</button>
+                  <button class="chip" data-inventory-filter-button="mine" type="button">Moje</button>
+                </div>
+                <label class="search inventory-search">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg>
+                  <input id="inventorySearchInput" type="search" placeholder="Szukaj towaru…" />
+                </label>
+              </div>
+            </div>
+            <div class="card-b inventory-table-wrap">
+              <table class="tbl inventory-table">
+                <thead>
+                  <tr><th>Towar</th><th>Kod</th><th>Lokalizacja</th><th>Stan</th><th>Poziom</th><th>Status</th></tr>
+                </thead>
+                <tbody id="stockBody"></tbody>
+              </table>
+            </div>
           </div>
         </section>
 
@@ -922,7 +1116,15 @@
                   <span class="settings-toggle-control"></span>
                   <span>
                     <strong>Czas pracy</strong>
-                    <small>Grafik, korekty i wnioski</small>
+                    <small>Grafik i korekty czasu</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" value="leaves" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Urlopy</strong>
+                    <small>Wnioski i decyzje urlopowe</small>
                   </span>
                 </label>
                 <label class="settings-toggle">
@@ -946,6 +1148,22 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div class="demobar source-demobar" id="sourceDemoBar">
+      <span class="lab">PALETA</span>
+      <div class="sw">
+        <button data-source-accent="indigo" type="button"><span class="swatch" style="background:#4f46e5"></span>Granat</button>
+        <button data-source-accent="blue" type="button"><span class="swatch" style="background:#2563eb"></span>Grafit</button>
+        <button data-source-accent="green" type="button"><span class="swatch" style="background:#0d9488"></span>Zieleń</button>
+        <button data-source-accent="red" type="button"><span class="swatch" style="background:#dc2626"></span>Czerwony</button>
+      </div>
+      <div class="divider"></div>
+      <span class="lab">TRYB</span>
+      <div class="sw">
+        <button data-source-theme="light" type="button">☀ Jasny</button>
+        <button data-source-theme="dark" type="button">☾ Ciemny</button>
+      </div>
     </div>
 
     <dialog id="postDialog" class="modal">
@@ -1070,6 +1288,45 @@
           <button class="primary-button" data-close-dialog type="button">Zamknij</button>
         </menu>
       </article>
+    </dialog>
+
+    <dialog id="inventoryFormDialog" class="modal">
+      <form id="inventoryForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Magazyn</p>
+            <h2>Dodaj towar</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <label>Nazwa towaru
+          <input id="inventoryNameInput" type="text" placeholder="Np. Folia stretch 23µm" required />
+        </label>
+        <div class="task-form-grid">
+          <label>Kod
+            <input id="inventorySkuInput" type="text" placeholder="Np. FOL-23" />
+          </label>
+          <label>Kategoria
+            <input id="inventoryCategoryInput" type="text" placeholder="Np. Materiały" />
+          </label>
+          <label>Stan
+            <input id="inventoryQuantityInput" type="number" min="0" step="0.01" value="0" />
+          </label>
+          <label>Minimum
+            <input id="inventoryMinimumInput" type="number" min="0" step="0.01" value="0" />
+          </label>
+          <label>Jednostka
+            <input id="inventoryUnitInput" type="text" value="szt." />
+          </label>
+          <label>Lokalizacja
+            <input id="inventoryLocationInput" type="text" placeholder="Np. A-01-3" />
+          </label>
+        </div>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Zapisz towar</button>
+        </menu>
+      </form>
     </dialog>
 
     <dialog id="knowledgeFormDialog" class="modal">
@@ -1327,6 +1584,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <script src="data.js?v=78"></script>
-    <script src="app.js?v=98"></script>
+    <script src="app.js?v=108"></script>
   </body>
 </html>
