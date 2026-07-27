@@ -134,6 +134,9 @@ const kudosPollIntervalMs = 8000;
 let presencePollTimer = null;
 let presencePollInFlight = false;
 const presencePollIntervalMs = 5000;
+let sharedDataPollTimer = null;
+let sharedDataPollInFlight = false;
+const sharedDataPollIntervalMs = 2500;
 
 const storageKeys = {
   accounts: "prokom-accounts-v3",
@@ -1374,6 +1377,7 @@ function normalizeTaskItem(task, fallbackColumn = "todo") {
     description: task.description || "Brak dodatkowego opisu.",
     source: task.source || columnLabels[column] || "Zadania",
     createdAt: task.createdAt || task.created_at || "Dzisiaj",
+    updatedAt: task.updatedAt || task.updated_at || "",
   };
 }
 
@@ -1402,6 +1406,7 @@ function taskSignature(value = tasks) {
         task.priority,
         task.description,
         task.source,
+        task.updatedAt,
       ]),
     ),
   );
@@ -1919,6 +1924,41 @@ function stopKnowledgePolling() {
   window.clearInterval(knowledgePollTimer);
   knowledgePollTimer = null;
   knowledgePollInFlight = false;
+}
+
+async function refreshSharedCompanyData(options = {}) {
+  if (sharedDataPollInFlight || !backendAvailable || !isLoggedIn()) return false;
+  if (document.hidden && !options.force) return false;
+  sharedDataPollInFlight = true;
+  try {
+    await Promise.allSettled([
+      pollAnnouncements(),
+      pollTasks(),
+      pollReports(),
+      pollRequests(),
+      pollCalendar(),
+      pollKnowledge(),
+      pollQuickPolls(),
+      pollKudos(),
+    ]);
+    if (options.includePresence) await refreshPresence();
+    return true;
+  } finally {
+    sharedDataPollInFlight = false;
+  }
+}
+
+function startSharedDataPolling() {
+  if (sharedDataPollTimer || !backendAvailable || !isLoggedIn()) return;
+  refreshSharedCompanyData({ force: true });
+  sharedDataPollTimer = window.setInterval(refreshSharedCompanyData, sharedDataPollIntervalMs);
+}
+
+function stopSharedDataPolling() {
+  if (!sharedDataPollTimer) return;
+  window.clearInterval(sharedDataPollTimer);
+  sharedDataPollTimer = null;
+  sharedDataPollInFlight = false;
 }
 
 async function pollPresence() {
@@ -2636,14 +2676,7 @@ async function signIn(login, password = "") {
       await syncKudosFromBackend({ silent: true });
       await syncChatGroupsFromBackend({ silent: true });
       await syncVisibleChatMessagesFromBackend();
-      startAnnouncementPolling();
-      startTaskPolling();
-      startReportPolling();
-      startRequestPolling();
-      startCalendarPolling();
-      startKnowledgePolling();
-      startQuickPollPolling();
-      startKudosPolling();
+      startSharedDataPolling();
       startChatPolling();
       startPresencePolling();
       $("#loginError").classList.add("hidden");
@@ -2691,6 +2724,7 @@ function signOut() {
   stopKnowledgePolling();
   stopQuickPollPolling();
   stopKudosPolling();
+  stopSharedDataPolling();
   stopChatPolling();
   stopPresencePolling();
   if (backendAvailable) {
@@ -2734,14 +2768,7 @@ async function restoreSession() {
       await syncKudosFromBackend({ silent: true });
       await syncChatGroupsFromBackend({ silent: true });
       await syncVisibleChatMessagesFromBackend();
-      startAnnouncementPolling();
-      startTaskPolling();
-      startReportPolling();
-      startRequestPolling();
-      startCalendarPolling();
-      startKnowledgePolling();
-      startQuickPollPolling();
-      startKudosPolling();
+      startSharedDataPolling();
       startChatPolling();
       startPresencePolling();
       refreshUserScopedUi();
@@ -7788,30 +7815,14 @@ async function boot() {
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
-      pollAnnouncements();
-      pollTasks();
-      pollReports();
-      pollRequests();
-      pollCalendar();
-      pollKnowledge();
-      pollQuickPolls();
-      pollKudos();
+      refreshSharedCompanyData({ force: true, includePresence: true });
       pollChatMessages();
-      refreshPresence();
     }
   });
 
   window.addEventListener("focus", () => {
-    pollAnnouncements();
-    pollTasks();
-    pollReports();
-    pollRequests();
-    pollCalendar();
-    pollKnowledge();
-    pollQuickPolls();
-    pollKudos();
+    refreshSharedCompanyData({ force: true, includePresence: true });
     pollChatMessages();
-    refreshPresence();
   });
 
   if ("serviceWorker" in navigator) {

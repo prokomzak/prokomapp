@@ -2012,6 +2012,7 @@ def task_payload(row: sqlite3.Row) -> dict:
         "column": row["column_key"],
         "source": row["source"],
         "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
     }
 
 
