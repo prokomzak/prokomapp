@@ -46,7 +46,7 @@ TADEUSZ_TITLE_MIGRATION_KEY = "tadeusz_title_szef_2026_07_22"
 KNOWLEDGE_CONTENT_MIGRATION_KEY = "knowledge_content_real_docs_2026_07_21"
 LEGACY_CONTENT_MIGRATION_KEY = "legacy_content_cleanup_2026_07_21"
 WEEKLY_SCHEDULE_MIGRATION_KEY = "weekly_schedule_current_week_2026_07_22"
-MAX_KNOWLEDGE_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_KNOWLEDGE_UPLOAD_BYTES = 100 * 1024 * 1024
 WORK_DAYS = (
     ("mon", "Pon"),
     ("tue", "Wt"),
@@ -548,6 +548,7 @@ def ensure_knowledge_schema(conn: sqlite3.Connection) -> None:
         ("file_mime", "file_mime TEXT"),
         ("file_size", "file_size INTEGER NOT NULL DEFAULT 0"),
         ("file_storage_name", "file_storage_name TEXT"),
+        ("link_url", "link_url TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE knowledge_articles ADD COLUMN {definition}")
@@ -1064,6 +1065,7 @@ def initialize_database() -> None:
               file_mime TEXT,
               file_size INTEGER NOT NULL DEFAULT 0,
               file_storage_name TEXT,
+              link_url TEXT,
               created_by TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY (created_by) REFERENCES users(login) ON DELETE SET NULL
@@ -1178,7 +1180,7 @@ def initialize_database() -> None:
             "database_role": "LAN server local file",
             "planned_lan_ip": "192.168.1.101",
             "backend": "python-standard-library",
-            "schema_version": "22",
+            "schema_version": "23",
         }
         for key, value in meta.items():
             conn.execute(
@@ -1318,15 +1320,27 @@ def knowledge_type_from_file(mime: str, filename: str) -> str:
     lowered = filename.lower()
     if mime.startswith("image/"):
         return "IMG"
+    if mime.startswith("video/") or lowered.endswith((".mp4", ".mov", ".avi", ".webm", ".mkv")):
+        return "VID"
     if "pdf" in mime or lowered.endswith(".pdf"):
         return "PDF"
-    if "spreadsheet" in mime or lowered.endswith((".xlsx", ".xls", ".csv")):
+    if "spreadsheet" in mime or lowered.endswith((".xlsx", ".xls", ".csv", ".ods")):
         return "XLS"
     if "word" in mime or lowered.endswith((".docx", ".doc")):
         return "DOC"
-    if lowered.endswith((".txt", ".md")) or mime.startswith("text/"):
+    if lowered.endswith((".txt", ".md", ".rtf")) or mime.startswith("text/"):
         return "TXT"
     return "PLIK"
+
+
+def normalize_knowledge_link(value: str) -> str:
+    link = str(value or "").strip()
+    if not link:
+        return ""
+    parsed = urlparse(link)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return link[:500]
 
 
 def seed_announcements(conn: sqlite3.Connection) -> None:
@@ -2307,6 +2321,7 @@ def knowledge_article_payload(row: sqlite3.Row) -> dict:
     file_name = row["file_name"] if "file_name" in row.keys() else None
     file_mime = row["file_mime"] if "file_mime" in row.keys() else None
     file_size = row["file_size"] if "file_size" in row.keys() else 0
+    link_url = row["link_url"] if "link_url" in row.keys() else None
     return {
         "id": row["id"],
         "type": row["type"],
@@ -2316,6 +2331,7 @@ def knowledge_article_payload(row: sqlite3.Row) -> dict:
         "fileMime": file_mime or "",
         "fileSize": int(file_size or 0),
         "fileUrl": f"/api/knowledge/articles/{quote(str(row['id']))}/download" if file_storage_name else "",
+        "linkUrl": link_url or "",
         "createdBy": row["created_by"],
         "createdAt": row["created_at"],
     }
@@ -2601,7 +2617,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
             self.send_json({"error": "Nie przeslano danych formularza."}, HTTPStatus.BAD_REQUEST)
             return None
         if length > MAX_KNOWLEDGE_UPLOAD_BYTES:
-            self.send_json({"error": "Plik jest za duzy. Limit to 25 MB."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            self.send_json({"error": "Plik jest za duzy. Limit to 100 MB."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return None
         body = self.rfile.read(length)
         message = BytesParser(policy=email_default_policy).parsebytes(
@@ -4317,10 +4333,45 @@ class ProkomHandler(BaseHTTPRequestHandler):
             return
         fields, files = parsed
         upload = files.get("document")
+        source_type = str(fields.get("sourceType", "file")).strip().lower()
         title = str(fields.get("title", "")).strip()
         detail = str(fields.get("detail", "")).strip()
+        link_url = normalize_knowledge_link(fields.get("linkUrl", ""))
         if not detail:
             self.send_json({"error": "Dodaj opis dokumentu."}, HTTPStatus.BAD_REQUEST)
+            return
+        if source_type == "link":
+            if not link_url:
+                self.send_json({"error": "Podaj poprawny link zaczynajacy sie od http:// albo https://."}, HTTPStatus.BAD_REQUEST)
+                return
+            if not title:
+                title = link_url
+            article_id = f"kb-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+            conn.execute(
+                """
+                INSERT INTO knowledge_articles(
+                  id, type, title, detail, file_name, file_mime, file_size, file_storage_name, link_url, created_by, created_at
+                )
+                VALUES(?, 'LINK', ?, ?, NULL, NULL, 0, NULL, ?, ?, ?)
+                """,
+                (
+                    article_id,
+                    title,
+                    detail,
+                    link_url,
+                    user["login"],
+                    now_text(),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_KNOWLEDGE_LINK', ?)",
+                (user["login"], article_id),
+            )
+            response = knowledge_snapshot(conn, user)
+            response["article"] = knowledge_article_payload(
+                conn.execute("SELECT * FROM knowledge_articles WHERE id = ?", (article_id,)).fetchone()
+            )
+            self.send_json(response, HTTPStatus.CREATED)
             return
         if not upload or not upload.get("content"):
             self.send_json({"error": "Wybierz plik dokumentu."}, HTTPStatus.BAD_REQUEST)
@@ -4341,9 +4392,9 @@ class ProkomHandler(BaseHTTPRequestHandler):
         conn.execute(
             """
             INSERT INTO knowledge_articles(
-              id, type, title, detail, file_name, file_mime, file_size, file_storage_name, created_by, created_at
+              id, type, title, detail, file_name, file_mime, file_size, file_storage_name, link_url, created_by, created_at
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
             """,
             (
                 article_id,

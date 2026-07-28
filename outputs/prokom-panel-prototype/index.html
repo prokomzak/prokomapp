@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=138" />
+    <link rel="stylesheet" href="styles.css?v=139" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -1379,11 +1379,20 @@
           <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
         </header>
         <div class="task-form-grid">
+          <label>Rodzaj materiału
+            <select id="kbSourceType" name="sourceType">
+              <option value="file">Plik</option>
+              <option value="link">Link</option>
+            </select>
+          </label>
           <label>Tytuł dokumentu
             <input id="kbTitleInput" name="title" required placeholder="Np. Instrukcja przyjęcia reklamacji" />
           </label>
-          <label>Plik
-            <input id="kbFileInput" name="document" required type="file" />
+          <label id="kbFileField">Plik
+            <input id="kbFileInput" name="document" required type="file" accept=".txt,.md,.csv,.xlsx,.xls,.ods,.pdf,.doc,.docx,image/*,video/*,text/*" />
+          </label>
+          <label id="kbLinkField" class="hidden">Link
+            <input id="kbLinkInput" name="linkUrl" type="url" inputmode="url" placeholder="https://..." />
           </label>
         </div>
         <label>Opis
@@ -1412,9 +1421,11 @@
           <div><span>Nazwa pliku</span><strong id="kbDialogFileName"></strong></div>
           <div><span>Rozmiar</span><strong id="kbDialogFileSize"></strong></div>
           <div><span>Typ pliku</span><strong id="kbDialogMime"></strong></div>
+          <div id="kbDialogLinkRow" class="hidden"><span>Link</span><strong id="kbDialogLink"></strong></div>
         </div>
         <menu>
           <a class="secondary-button hidden" id="kbDialogDownload" href="#" download>Pobierz dokument</a>
+          <a class="secondary-button hidden" id="kbDialogOpenLink" href="#" target="_blank" rel="noopener">Otwórz link</a>
           <button class="primary-button" data-close-dialog type="button">Zamknij</button>
         </menu>
       </article>
@@ -1636,6 +1647,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <script src="data.js?v=78"></script>
-    <script src="app.js?v=140"></script>
+    <script src="app.js?v=141"></script>
   </body>
 </html>

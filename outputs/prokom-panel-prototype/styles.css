@@ -7142,6 +7142,12 @@ textarea:focus {
   gap: 8px;
 }
 
+#knowledge .kb-card .muted,
+#kbDialogLink {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 #knowledge .handover-form {
   display: grid;
   gap: 10px;
