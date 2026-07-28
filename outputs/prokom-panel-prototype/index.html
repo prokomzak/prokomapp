@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=108" />
+    <link rel="stylesheet" href="styles.css?v=138" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -107,7 +107,7 @@
 
           <span class="nav-section nav-label" data-nav-section="system">System</span>
           <button class="nav-item" data-view="settings" type="button">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6h.1A1.6 1.6 0 0 0 9 1.1V1a2 2 0 0 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H23a2 2 0 0 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.52a2 2 0 0 1-1 1.72l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.52a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             <span>Ustawienia</span>
           </button>
         </nav>
@@ -203,7 +203,7 @@
                 <div class="chips" id="annFilter">
                   <button class="chip on active" data-feed-filter="all" type="button">Wszystkie</button>
                   <button class="chip" data-feed-filter="urgent" type="button">Pilne</button>
-                  <button class="chip" data-feed-filter="boss" type="button">Ważne</button>
+                  <button class="chip" data-feed-filter="important" type="button">Ważne</button>
                   <button class="chip" data-feed-filter="mine" type="button">Moje</button>
                   <button class="chip" data-feed-filter="unread" type="button">Nieprzeczytane</button>
                 </div>
@@ -211,7 +211,7 @@
               <div class="card-b">
                 <div class="composer" id="dashboardComposer">
                   <button class="trigger" data-quick-announcement type="button">
-                    <div class="av" id="announcementComposerAvatar">TA</div>
+                    <div class="av source-composer-avatar" data-announcement-composer-avatar aria-label="Autor ogłoszenia">TA</div>
                     <div class="ph">Napisz ogłoszenie do zespołu...</div>
                   </button>
                 </div>
@@ -222,7 +222,7 @@
             </article>
 
             <div class="w source-side-column">
-              <article class="card">
+              <article class="card clock-card" data-clock-state="out">
                 <div class="card-h">
                   <h3>Mój czas dziś</h3>
                   <span class="status-pill"><span class="p"></span><span id="clockStatus">Niewbity</span></span>
@@ -230,7 +230,7 @@
                 <div class="card-b">
                   <div class="mini-time">
                     <div class="clock" id="liveTimer">00:00:00</div>
-                    <div class="source-clock-meta">Start 09:02 · Przerwa 24m · cel 8h</div>
+                    <div class="source-clock-meta" id="dashboardClockMeta">Dziś · 00:00:00 · cel 8h</div>
                   </div>
                   <div class="source-clock-actions">
                     <button id="breakButton" class="btn btn-ghost secondary-button" type="button" disabled>☕ Przerwa</button>
@@ -243,14 +243,14 @@
                 <div class="card-h"><h3>Wymaga uwagi</h3></div>
                 <div class="card-b">
                   <div class="people source-attention-list">
-                    <div class="person"><div class="av source-warning">2</div><div><div class="n">Zadania na jutro</div><div class="r">Raport wysyłek, cennik</div></div><button class="stat off" data-view-shortcut="tasks" type="button">Otwórz</button></div>
-                    <div class="person"><div class="av source-danger">!</div><div><div class="n">Niski stan: folia</div><div class="r">8 szt. (min. 20)</div></div><button class="stat off" data-view-shortcut="reports" type="button">Otwórz</button></div>
-                    <div class="person"><div class="av source-info">1</div><div><div class="n">Zgłoszenie oczekuje</div><div class="r">Braki towaru</div></div><button class="stat off" data-view-shortcut="reports" type="button">Otwórz</button></div>
+                    <div class="person"><div class="av source-warning attention-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div><div><div class="n">Zadania na jutro</div><div class="r">Raport wysyłek, cennik</div></div><button class="stat off" data-view-shortcut="tasks" type="button">Otwórz</button></div>
+                    <div class="person"><div class="av source-danger attention-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div><div><div class="n">Niski stan: folia</div><div class="r">8 szt. (min. 20)</div></div><button class="stat off" data-view-shortcut="inventory" type="button">Otwórz</button></div>
+                    <div class="person"><div class="av source-info attention-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div><div><div class="n">Zgłoszenie oczekuje</div><div class="r">Braki towaru</div></div><button class="stat off" data-view-shortcut="reports" type="button">Otwórz</button></div>
                   </div>
                 </div>
               </article>
 
-              <article class="card">
+              <article class="card source-upcoming-card">
                 <div class="card-h"><h3>Nadchodzące</h3></div>
                 <div class="card-b">
                   <ol class="timeline source-events" id="dashboardUpcomingList">
@@ -290,11 +290,11 @@
           </div>
         </section>
 
-        <section id="announcements" class="view">
+        <section id="announcements" class="view announcement-reference-view">
           <div class="announcements-page-head">
             <div>
-              <h2>Ogłoszenia firmowe</h2>
-              <p>Publikuj komunikaty dla zespołu, śledź potwierdzenia odczytu, reakcje, komentarze i załączniki.</p>
+              <h2>Ogłoszenia</h2>
+              <p>Komunikaty dla zespołu z potwierdzeniami odczytu i reakcjami.</p>
             </div>
           </div>
           <div class="split-layout">
@@ -303,8 +303,8 @@
                 <h2>Nowe ogłoszenie</h2>
                 <span class="pill">Adresaci i odczyty</span>
               </header>
-              <label>Tytuł<input id="postTitle" name="title" required /></label>
-              <label>Treść<textarea id="postBody" name="body" rows="5"></textarea></label>
+              <label>Tytuł<input id="postTitle" name="title" placeholder="Krótki, konkretny tytuł" required /></label>
+              <label>Treść<textarea id="postBody" name="body" rows="5" placeholder="Treść ogłoszenia..."></textarea></label>
               <div class="form-row">
                 <label>Priorytet
                   <select id="postPriority" name="priority">
@@ -324,7 +324,7 @@
               <label>Załącznik
                 <input id="postAttachment" name="attachment" type="file" />
               </label>
-              <fieldset>
+              <fieldset class="announcement-recipient-fieldset">
                 <legend>Wybrane osoby</legend>
                 <div class="recipient-grid" id="recipientGrid"></div>
               </fieldset>
@@ -333,38 +333,34 @@
 
             <div class="panel announcement-feed-panel">
               <header class="panel-header">
-                <h2>Tablica ogłoszeń</h2>
+                <h2>Aktywne ogłoszenia</h2>
                 <div class="segmented">
-                  <button class="active" data-announcement-filter="active" type="button">Aktywne</button>
+                  <button class="active" data-announcement-filter="all" type="button">Aktywne</button>
                   <button data-announcement-filter="urgent" type="button">Pilne</button>
                   <button data-announcement-filter="mine" type="button">Moje</button>
                 </div>
               </header>
-              <button class="announcement-composer-trigger" data-focus-announcement-form type="button">
-                <span class="announcement-composer-avatar" id="announcementComposerAvatar">PK</span>
-                <span>Napisz ogłoszenie do zespołu...</span>
-              </button>
               <div id="announcementList" class="announcement-list"></div>
             </div>
           </div>
         </section>
 
-        <section id="tasks" class="view">
-          <div class="final-page-head">
+        <section id="tasks" class="view task-reference-view">
+          <header class="tasks-reference-head">
             <div>
               <h2>Zadania</h2>
-              <p>Tablica kanban zespołu. Przeciągnij kartę, aby zmienić status lub otwórz szczegóły zadania.</p>
+              <p>Tablica kanban zespołu. Przeciągnij kartę, aby zmienić status.</p>
             </div>
-          </div>
-          <div class="toolbar">
-            <div class="segmented">
-              <button class="active" data-task-filter="all" type="button">Cała firma</button>
-              <button data-task-filter="mine" type="button">Moje zadania</button>
-              <button class="admin-only" data-task-filter="person" type="button">Per osoba</button>
+            <div class="toolbar tasks-reference-actions">
+              <div class="segmented">
+                <button class="active" data-task-filter="all" type="button">Cała firma</button>
+                <button data-task-filter="mine" type="button">Moje</button>
+                <button data-task-filter="urgent" type="button">Pilne</button>
+              </div>
+              <button id="addTaskButton" class="primary-button" type="button">+ Dodaj zadanie</button>
             </div>
-            <button id="addTaskButton" class="primary-button" type="button">Dodaj zadanie</button>
-          </div>
-          <div class="kanban" id="kanban"></div>
+          </header>
+          <div class="kanban tasks-reference-board" id="kanban"></div>
         </section>
 
         <section id="time" class="view">
@@ -453,22 +449,22 @@
               </div>
             </article>
 
-            <article class="panel wide-panel">
+            <article class="panel wide-panel schedule-panel">
               <header class="panel-header">
                 <h2>Grafik pracy zespołu</h2>
-                <div class="panel-actions schedule-tools">
-                  <button class="secondary-button" id="schedulePrevWeek" type="button">Poprzedni</button>
-                  <label class="week-picker">Tydzień<input id="scheduleWeekInput" type="week" /></label>
-                  <button class="secondary-button" id="scheduleCurrentWeek" type="button">Bieżący</button>
-                  <button class="secondary-button" id="scheduleNextWeek" type="button">Następny</button>
-                  <button class="secondary-button admin-only" id="copyPreviousScheduleButton" type="button">Kopiuj poprzedni</button>
-                  <button class="secondary-button admin-only" id="bulkScheduleButton" type="button">Wpis zbiorczy</button>
-                  <button class="secondary-button admin-only" id="exportTimeButton" type="button">Eksport CSV</button>
-                </div>
+                <p class="muted" id="exportStatus">Ostatni eksport: jeszcze nie wygenerowano</p>
               </header>
+              <div class="panel-actions schedule-tools">
+                <button class="secondary-button" id="schedulePrevWeek" type="button">Poprzedni</button>
+                <label class="week-picker">Tydzień<input id="scheduleWeekInput" type="week" /></label>
+                <button class="secondary-button" id="scheduleCurrentWeek" type="button">Bieżący</button>
+                <button class="secondary-button" id="scheduleNextWeek" type="button">Następny</button>
+                <button class="secondary-button admin-only" id="copyPreviousScheduleButton" type="button">Kopiuj poprzedni</button>
+                <button class="secondary-button admin-only" id="bulkScheduleButton" type="button">Wpis zbiorczy</button>
+                <button class="secondary-button admin-only" id="exportTimeButton" type="button">Eksport CSV</button>
+              </div>
               <span class="pill teal" id="scheduleWeekLabel">Obecny tydzień</span>
               <p class="muted admin-only" id="scheduleHelp">Admin klika komórkę grafiku i wybiera godziny lub typ nieobecności.</p>
-              <p class="muted" id="exportStatus">Ostatni eksport: jeszcze nie wygenerowano</p>
               <div class="schedule-table" id="scheduleTable"></div>
             </article>
 
@@ -538,7 +534,7 @@
               <div class="trend up">z 4</div>
             </article>
           </div>
-          <div class="two leaves-layout">
+          <div class="leaves-layout">
             <article class="card leaves-table-card">
               <div class="card-h">
                 <h3>Wnioski zespołu</h3>
@@ -606,11 +602,11 @@
           </div>
         </section>
 
-        <section id="reports" class="view">
+        <section id="reports" class="view report-reference-view">
           <div class="reports-page-head">
             <div>
               <h2>Zgłoszenia wewnętrzne</h2>
-              <p>Zgłaszaj problemy i braki z możliwością przyjęcia, zamknięcia oraz zamiany na zadania.</p>
+              <p>Zgłaszaj problemy i braki — z automatyczną zamianą na zadania.</p>
             </div>
           </div>
           <div class="split-layout">
@@ -626,7 +622,14 @@
                   <option>Sprawa organizacyjna</option>
                 </select>
               </label>
-              <label>Opis<textarea id="reportText" name="detail" rows="5"></textarea></label>
+              <label>Priorytet
+                <select id="reportPriority" name="priority">
+                  <option value="normal">Zwykłe</option>
+                  <option value="important">Ważne</option>
+                  <option value="urgent">Pilne</option>
+                </select>
+              </label>
+              <label>Opis<textarea id="reportText" name="detail" rows="5" placeholder="Opisz problem..."></textarea></label>
               <label>Zdjęcie / załącznik<input id="reportFileInput" name="attachment" type="file" /></label>
               <button class="primary-button" type="submit">Wyślij zgłoszenie</button>
             </form>
@@ -644,7 +647,29 @@
           </div>
         </section>
 
-        <section id="chat" class="view">
+        <section id="chat" class="view chat-reference-view">
+          <div class="chat-page-head">
+            <div>
+              <h2>Czat</h2>
+              <p>Kanały, rozmowy grupowe i prywatne · statusy odczytu i załączniki.</p>
+            </div>
+            <div class="chat-new-wrap admin-only">
+              <button class="primary-button chat-new-button" data-chat-new-toggle type="button">
+                <span>+</span> Nowa rozmowa
+              </button>
+              <div class="chat-new-menu hidden" id="chatNewMenu">
+                <form class="chat-group-form" id="chatGroupForm">
+                  <div class="chat-new-menu-head">
+                    <strong>Nowa grupa</strong>
+                    <span class="pill">Tylko admin</span>
+                  </div>
+                  <label>Nazwa grupy<input id="chatGroupName" type="text" placeholder="Np. Zmiana sobotnia" /></label>
+                  <div class="chat-member-grid" id="chatGroupMembers"></div>
+                  <button class="primary-button" type="submit">Utwórz grupę</button>
+                </form>
+              </div>
+            </div>
+          </div>
           <div class="chat-layout">
             <aside class="panel conversations-panel">
               <header class="panel-header">
@@ -652,21 +677,12 @@
                 <span class="pill">Kontakty</span>
               </header>
               <div class="conversation-list" id="conversationList"></div>
-              <form class="chat-group-form admin-only" id="chatGroupForm">
-                <div>
-                  <strong>Nowa grupa</strong>
-                  <span class="muted">Tylko administrator</span>
-                </div>
-                <label>Nazwa grupy<input id="chatGroupName" type="text" placeholder="Np. Zmiana sobotnia" /></label>
-                <div class="chat-member-grid" id="chatGroupMembers"></div>
-                <button class="secondary-button" type="submit">Utwórz grupę</button>
-              </form>
             </aside>
             <article class="panel chat-panel">
               <header class="panel-header">
                 <div>
                   <h2 id="chatTitle">Cała firma</h2>
-                  <span class="muted">Statusy napisane/odczytane, załączniki i rozmowy grupowe</span>
+                  <span class="muted" id="chatSubtitle">Statusy napisane/odczytane, załączniki i rozmowy grupowe</span>
                 </div>
                 <span class="pill green">Online</span>
               </header>
@@ -780,18 +796,43 @@
           </div>
         </section>
 
-        <section id="team" class="view">
-          <div class="final-page-head">
+        <section id="team" class="view team-reference-view">
+          <div class="final-page-head team-page-head">
             <div>
               <h2>Zespół</h2>
-              <p>Profile pracowników, role, uprawnienia, konta i dostęp do aplikacji.</p>
+              <p>Profile pracowników, role, uprawnienia i urlopy.</p>
             </div>
+            <button class="primary-button admin-only" data-focus-account-form type="button">Dodaj pracownika</button>
           </div>
-          <form class="panel form-panel password-panel" id="passwordForm">
+          <div class="team-kpi-row">
+            <article class="team-kpi-card">
+              <div class="team-kpi-icon team-kpi-people">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M17 5.5a3 3 0 0 1 0 5"/><path d="M21 20a5.5 5.5 0 0 0-3.5-5.1"/></svg>
+              </div>
+              <span class="team-kpi-label">Pracowników</span>
+              <strong id="teamPeopleCount">0</strong>
+            </article>
+            <article class="team-kpi-card">
+              <div class="team-kpi-icon team-kpi-working">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
+              </div>
+              <span class="team-kpi-label">W pracy</span>
+              <strong id="teamWorkingPeopleCount">0</strong>
+            </article>
+            <article class="team-kpi-card">
+              <div class="team-kpi-icon team-kpi-leave">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20l1.5-9h9L18 20z"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+              </div>
+              <span class="team-kpi-label">Na urlopie</span>
+              <strong id="teamLeavePeopleCount">0</strong>
+            </article>
+          </div>
+          <div class="team-grid" id="teamGrid"></div>
+          <form class="panel form-panel password-panel team-password-card" id="passwordForm">
             <header class="panel-header">
               <div>
                 <h2>Zmiana hasła</h2>
-                <span class="muted">Pracownik zmienia własne hasło, administrator może resetować hasła kont poniżej</span>
+                <span class="muted">Zmień hasło do swojego konta firmowego.</span>
               </div>
               <span class="pill green" id="passwordAccountLabel">Moje konto</span>
             </header>
@@ -803,7 +844,7 @@
             <button class="primary-button" type="submit">Zmień moje hasło</button>
           </form>
 
-          <div class="team-admin-layout admin-only">
+          <div class="team-admin-layout admin-only" id="teamAccountAdmin">
             <form class="panel form-panel" id="accountForm">
               <header class="panel-header">
                 <div>
@@ -836,7 +877,6 @@
               <div class="account-management-list" id="accountManagementList"></div>
             </article>
           </div>
-          <div class="team-grid" id="teamGrid"></div>
         </section>
 
         <section id="stats" class="view">
@@ -901,14 +941,14 @@
                   <h2>Aktywność firmy - ostatnie 7 dni</h2>
                   <p id="statsSummary" class="muted">Brak danych do raportu.</p>
                 </div>
-                <span class="pill green">Aktywność</span>
+                <span class="pill green" id="statsActivityBadge">Godziny</span>
               </header>
               <div class="stats-activity-chart" id="statsBarChart" aria-label="Aktywność firmy z ostatnich 7 dni"></div>
             </article>
             <article class="panel stats-chart-card wide-panel">
               <header class="panel-header">
                 <h2>Trend produktywności (6 miesięcy)</h2>
-                <span class="pill amber" id="statsTrendBadge">Wpisy</span>
+                <span class="pill amber" id="statsTrendBadge">Zadania</span>
               </header>
               <div class="stats-trend-chart" id="statsTrendChart" aria-label="Trend produktywności z ostatnich 6 miesięcy"></div>
             </article>
@@ -1397,6 +1437,18 @@
           <div><span>Źródło</span><strong id="taskDialogSource"></strong></div>
           <div><span>Utworzono</span><strong id="taskDialogCreated"></strong></div>
         </div>
+        <div class="reaction-bar entity-dialog-reactions" id="taskReactionBar"></div>
+        <section class="comment-section task-comment-section">
+          <div class="comment-section-header">
+            <h3>Komentarze</h3>
+            <span class="pill" id="taskCommentCount">0</span>
+          </div>
+          <div class="comment-list" id="taskComments"></div>
+          <form class="comment-form" id="taskCommentForm">
+            <input id="taskCommentInput" type="text" placeholder="Dodaj komentarz do zadania" required />
+            <button class="secondary-button" type="submit">Dodaj</button>
+          </form>
+        </section>
         <menu>
           <button class="secondary-button hidden" data-task-reopen-active type="button">Cofnij ukończenie</button>
           <button class="secondary-button danger-button" data-task-delete-active type="button">Usuń zadanie</button>
@@ -1584,6 +1636,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <script src="data.js?v=78"></script>
-    <script src="app.js?v=108"></script>
+    <script src="app.js?v=140"></script>
   </body>
 </html>

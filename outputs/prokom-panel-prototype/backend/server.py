@@ -483,7 +483,11 @@ def migrate_app_account_roster(conn: sqlite3.Connection) -> None:
             ("announcement_comments", "author_login"),
             ("company_tasks", "owner_login"),
             ("company_tasks", "created_by"),
+            ("task_reactions", "user_login"),
+            ("task_comments", "author_login"),
             ("internal_reports", "owner_login"),
+            ("report_reactions", "user_login"),
+            ("report_comments", "author_login"),
             ("employee_requests", "owner_login"),
             ("calendar_events", "created_by"),
             ("knowledge_articles", "created_by"),
@@ -957,6 +961,27 @@ def initialize_database() -> None:
               FOREIGN KEY (created_by) REFERENCES users(login) ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS task_reactions (
+              task_id TEXT NOT NULL,
+              reaction_id TEXT NOT NULL,
+              user_login TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (task_id, reaction_id, user_login),
+              FOREIGN KEY (task_id) REFERENCES company_tasks(id) ON DELETE CASCADE,
+              FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS task_comments (
+              id TEXT PRIMARY KEY,
+              task_id TEXT NOT NULL,
+              author_login TEXT,
+              body TEXT NOT NULL,
+              time_label TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (task_id) REFERENCES company_tasks(id) ON DELETE CASCADE,
+              FOREIGN KEY (author_login) REFERENCES users(login) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS internal_reports (
               id TEXT PRIMARY KEY,
               category TEXT NOT NULL,
@@ -972,6 +997,27 @@ def initialize_database() -> None:
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY (owner_login) REFERENCES users(login) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS report_reactions (
+              report_id TEXT NOT NULL,
+              reaction_id TEXT NOT NULL,
+              user_login TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (report_id, reaction_id, user_login),
+              FOREIGN KEY (report_id) REFERENCES internal_reports(id) ON DELETE CASCADE,
+              FOREIGN KEY (user_login) REFERENCES users(login) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS report_comments (
+              id TEXT PRIMARY KEY,
+              report_id TEXT NOT NULL,
+              author_login TEXT,
+              body TEXT NOT NULL,
+              time_label TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (report_id) REFERENCES internal_reports(id) ON DELETE CASCADE,
+              FOREIGN KEY (author_login) REFERENCES users(login) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS employee_requests (
@@ -1106,8 +1152,12 @@ def initialize_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_announcement_comments_post ON announcement_comments(post_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_company_tasks_column ON company_tasks(column_key, position);
             CREATE INDEX IF NOT EXISTS idx_company_tasks_owner ON company_tasks(owner_login);
+            CREATE INDEX IF NOT EXISTS idx_task_reactions_task ON task_reactions(task_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_internal_reports_status ON internal_reports(status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_internal_reports_owner ON internal_reports(owner_login);
+            CREATE INDEX IF NOT EXISTS idx_report_reactions_report ON report_reactions(report_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_report_comments_report ON report_comments(report_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_employee_requests_status ON employee_requests(status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_employee_requests_owner ON employee_requests(owner_login);
             CREATE INDEX IF NOT EXISTS idx_calendar_events_day ON calendar_events(day, time_label);
@@ -2017,7 +2067,52 @@ def announcements_snapshot(conn: sqlite3.Connection, user: sqlite3.Row) -> dict:
     return {"posts": [announcement_payload(conn, row, user) for row in rows]}
 
 
-def task_payload(row: sqlite3.Row) -> dict:
+def entity_reactions_payload(conn: sqlite3.Connection, table: str, parent_column: str, parent_id: str) -> dict[str, list[str]]:
+    if (table, parent_column) not in {("task_reactions", "task_id"), ("report_reactions", "report_id")}:
+        return {reaction_id: [] for reaction_id in ANNOUNCEMENT_REACTIONS}
+    reactions = {reaction_id: [] for reaction_id in ANNOUNCEMENT_REACTIONS}
+    rows = conn.execute(
+        f"""
+        SELECT reaction_id, user_login, COALESCE(u.display_name, user_login) AS display_name
+        FROM {table} er
+        LEFT JOIN users u ON u.login = er.user_login
+        WHERE {parent_column} = ?
+        ORDER BY er.created_at, er.user_login COLLATE NOCASE
+        """,
+        (parent_id,),
+    ).fetchall()
+    for reaction in rows:
+        if reaction["reaction_id"] in reactions:
+            reactions[reaction["reaction_id"]].append(reaction["display_name"])
+    return reactions
+
+
+def task_comments_payload(conn: sqlite3.Connection, task_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT c.id, c.author_login, c.body, c.time_label, c.created_at,
+               COALESCE(u.display_name, c.author_login, 'Uzytkownik') AS display_name
+        FROM task_comments c
+        LEFT JOIN users u ON u.login = c.author_login
+        WHERE c.task_id = ?
+        ORDER BY c.created_at, c.id
+        """,
+        (task_id,),
+    ).fetchall()
+    return [
+        {
+            "id": comment["id"],
+            "authorLogin": comment["author_login"],
+            "author": comment["display_name"],
+            "body": comment["body"],
+            "time": comment["time_label"],
+            "createdAt": comment["created_at"],
+        }
+        for comment in rows
+    ]
+
+
+def task_payload(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> dict:
     return {
         "id": row["id"],
         "title": row["title"],
@@ -2030,6 +2125,8 @@ def task_payload(row: sqlite3.Row) -> dict:
         "source": row["source"],
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
+        "reactions": entity_reactions_payload(conn, "task_reactions", "task_id", row["id"]) if conn else {},
+        "comments": task_comments_payload(conn, row["id"]) if conn else [],
     }
 
 
@@ -2043,11 +2140,36 @@ def tasks_snapshot(conn: sqlite3.Connection) -> dict:
     ).fetchall()
     grouped = {column: [] for column in TASK_COLUMNS}
     for row in rows:
-        grouped.setdefault(row["column_key"], []).append(task_payload(row))
+        grouped.setdefault(row["column_key"], []).append(task_payload(row, conn))
     return {"tasks": grouped}
 
 
-def report_payload(row: sqlite3.Row) -> dict:
+def report_comments_payload(conn: sqlite3.Connection, report_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT c.id, c.author_login, c.body, c.time_label, c.created_at,
+               COALESCE(u.display_name, c.author_login, 'Uzytkownik') AS display_name
+        FROM report_comments c
+        LEFT JOIN users u ON u.login = c.author_login
+        WHERE c.report_id = ?
+        ORDER BY c.created_at, c.id
+        """,
+        (report_id,),
+    ).fetchall()
+    return [
+        {
+            "id": comment["id"],
+            "authorLogin": comment["author_login"],
+            "author": comment["display_name"],
+            "body": comment["body"],
+            "time": comment["time_label"],
+            "createdAt": comment["created_at"],
+        }
+        for comment in rows
+    ]
+
+
+def report_payload(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> dict:
     file_name = row["file_name"] if "file_name" in row.keys() else None
     file_mime = row["file_mime"] if "file_mime" in row.keys() else None
     file_size = row["file_size"] if "file_size" in row.keys() else 0
@@ -2067,6 +2189,8 @@ def report_payload(row: sqlite3.Row) -> dict:
         "fileMime": file_mime or "",
         "fileSize": int(file_size or 0),
         "fileUrl": f"/api/reports/{quote(row['id'])}/download" if file_storage_name else "",
+        "reactions": entity_reactions_payload(conn, "report_reactions", "report_id", row["id"]) if conn else {},
+        "comments": report_comments_payload(conn, row["id"]) if conn else [],
     }
 
 
@@ -2078,7 +2202,7 @@ def reports_snapshot(conn: sqlite3.Connection) -> dict:
         ORDER BY updated_at DESC, created_at DESC, id DESC
         """
     ).fetchall()
-    return {"reports": [report_payload(row) for row in rows]}
+    return {"reports": [report_payload(row, conn) for row in rows]}
 
 
 def request_payload(row: sqlite3.Row) -> dict:
@@ -2672,7 +2796,15 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if not user:
                         self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
                         return
-                    task_id = unquote(path.removeprefix("/api/tasks/"))
+                    task_path = path.removeprefix("/api/tasks/")
+                    parts = [unquote(part) for part in task_path.split("/") if part]
+                    if len(parts) == 2 and method == "POST" and parts[1] == "comments":
+                        self.create_task_comment(conn, user, parts[0])
+                        return
+                    if len(parts) == 2 and method == "POST" and parts[1] == "reactions":
+                        self.toggle_task_reaction(conn, user, parts[0])
+                        return
+                    task_id = parts[0] if parts else ""
                     if method == "PATCH":
                         self.update_task(conn, user, task_id)
                         return
@@ -2699,11 +2831,17 @@ class ProkomHandler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
                         return
                     report_path = path.removeprefix("/api/reports/")
-                    if report_path.endswith("/download") and method == "GET":
-                        report_id = unquote(report_path.removesuffix("/download").rstrip("/"))
-                        self.serve_report_file(conn, user, report_id)
+                    parts = [unquote(part) for part in report_path.split("/") if part]
+                    if len(parts) == 2 and method == "GET" and parts[1] == "download":
+                        self.serve_report_file(conn, user, parts[0])
                         return
-                    report_id = unquote(report_path)
+                    if len(parts) == 2 and method == "POST" and parts[1] == "comments":
+                        self.create_report_comment(conn, user, parts[0])
+                        return
+                    if len(parts) == 2 and method == "POST" and parts[1] == "reactions":
+                        self.toggle_report_reaction(conn, user, parts[0])
+                        return
+                    report_id = parts[0] if parts else ""
                     if method == "PATCH":
                         self.update_report(conn, user, report_id)
                         return
@@ -3635,8 +3773,75 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (user["login"], task_id),
         )
         response = tasks_snapshot(conn)
-        response["task"] = task_payload(conn.execute("SELECT * FROM company_tasks WHERE id = ?", (task_id,)).fetchone())
+        response["task"] = task_payload(conn.execute("SELECT * FROM company_tasks WHERE id = ?", (task_id,)).fetchone(), conn)
         self.send_json(response, HTTPStatus.CREATED)
+
+    def create_task_comment(self, conn: sqlite3.Connection, user: sqlite3.Row, task_id: str) -> None:
+        task = conn.execute("SELECT id, title FROM company_tasks WHERE id = ?", (task_id,)).fetchone()
+        if not task:
+            self.send_json({"error": "Nie znaleziono zadania."}, HTTPStatus.NOT_FOUND)
+            return
+        payload = self.read_json()
+        body = str(payload.get("body", "")).strip()
+        if not body:
+            self.send_json({"error": "Komentarz nie moze byc pusty."}, HTTPStatus.BAD_REQUEST)
+            return
+        comment_id = f"task-comment-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        conn.execute(
+            """
+            INSERT INTO task_comments(id, task_id, author_login, body, time_label, created_at)
+            VALUES(?, ?, ?, ?, ?, ?)
+            """,
+            (comment_id, task_id, user["login"], body, time.strftime("%H:%M"), now_text()),
+        )
+        conn.execute("UPDATE company_tasks SET updated_at = ? WHERE id = ?", (now_text(), task_id))
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_TASK_COMMENT', ?)",
+            (user["login"], task_id),
+        )
+        response = tasks_snapshot(conn)
+        response["task"] = task_payload(conn.execute("SELECT * FROM company_tasks WHERE id = ?", (task_id,)).fetchone(), conn)
+        self.send_json(response, HTTPStatus.CREATED)
+
+    def toggle_task_reaction(self, conn: sqlite3.Connection, user: sqlite3.Row, task_id: str) -> None:
+        task = conn.execute("SELECT id, title FROM company_tasks WHERE id = ?", (task_id,)).fetchone()
+        if not task:
+            self.send_json({"error": "Nie znaleziono zadania."}, HTTPStatus.NOT_FOUND)
+            return
+        payload = self.read_json()
+        reaction_id = str(payload.get("reactionId", ""))
+        if reaction_id not in ANNOUNCEMENT_REACTIONS:
+            self.send_json({"error": "Nieznana reakcja."}, HTTPStatus.BAD_REQUEST)
+            return
+        existing = conn.execute(
+            """
+            SELECT 1
+            FROM task_reactions
+            WHERE task_id = ? AND reaction_id = ? AND user_login = ?
+            """,
+            (task_id, reaction_id, user["login"]),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "DELETE FROM task_reactions WHERE task_id = ? AND reaction_id = ? AND user_login = ?",
+                (task_id, reaction_id, user["login"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO task_reactions(task_id, reaction_id, user_login, created_at)
+                VALUES(?, ?, ?, ?)
+                """,
+                (task_id, reaction_id, user["login"], now_text()),
+            )
+        conn.execute("UPDATE company_tasks SET updated_at = ? WHERE id = ?", (now_text(), task_id))
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'TOGGLE_TASK_REACTION', ?)",
+            (user["login"], f"{task_id}: {reaction_id}"),
+        )
+        response = tasks_snapshot(conn)
+        response["task"] = task_payload(conn.execute("SELECT * FROM company_tasks WHERE id = ?", (task_id,)).fetchone(), conn)
+        self.send_json(response)
 
     def update_task(self, conn: sqlite3.Connection, user: sqlite3.Row, task_id: str) -> None:
         task = conn.execute("SELECT * FROM company_tasks WHERE id = ?", (task_id,)).fetchone()
@@ -3694,7 +3899,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (user["login"], task_id),
         )
         response = tasks_snapshot(conn)
-        response["task"] = task_payload(conn.execute("SELECT * FROM company_tasks WHERE id = ?", (task_id,)).fetchone())
+        response["task"] = task_payload(conn.execute("SELECT * FROM company_tasks WHERE id = ?", (task_id,)).fetchone(), conn)
         self.send_json(response)
 
     def delete_task(self, conn: sqlite3.Connection, user: sqlite3.Row, task_id: str) -> None:
@@ -3770,8 +3975,75 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (user["login"], report_id),
         )
         response = reports_snapshot(conn)
-        response["report"] = report_payload(conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone())
+        response["report"] = report_payload(conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone(), conn)
         self.send_json(response, HTTPStatus.CREATED)
+
+    def create_report_comment(self, conn: sqlite3.Connection, user: sqlite3.Row, report_id: str) -> None:
+        report = conn.execute("SELECT id, title FROM internal_reports WHERE id = ?", (report_id,)).fetchone()
+        if not report:
+            self.send_json({"error": "Nie znaleziono zgloszenia."}, HTTPStatus.NOT_FOUND)
+            return
+        payload = self.read_json()
+        body = str(payload.get("body", "")).strip()
+        if not body:
+            self.send_json({"error": "Komentarz nie moze byc pusty."}, HTTPStatus.BAD_REQUEST)
+            return
+        comment_id = f"report-comment-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        conn.execute(
+            """
+            INSERT INTO report_comments(id, report_id, author_login, body, time_label, created_at)
+            VALUES(?, ?, ?, ?, ?, ?)
+            """,
+            (comment_id, report_id, user["login"], body, time.strftime("%H:%M"), now_text()),
+        )
+        conn.execute("UPDATE internal_reports SET updated_at = ? WHERE id = ?", (now_text(), report_id))
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_REPORT_COMMENT', ?)",
+            (user["login"], report_id),
+        )
+        response = reports_snapshot(conn)
+        response["report"] = report_payload(conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone(), conn)
+        self.send_json(response, HTTPStatus.CREATED)
+
+    def toggle_report_reaction(self, conn: sqlite3.Connection, user: sqlite3.Row, report_id: str) -> None:
+        report = conn.execute("SELECT id, title FROM internal_reports WHERE id = ?", (report_id,)).fetchone()
+        if not report:
+            self.send_json({"error": "Nie znaleziono zgloszenia."}, HTTPStatus.NOT_FOUND)
+            return
+        payload = self.read_json()
+        reaction_id = str(payload.get("reactionId", ""))
+        if reaction_id not in ANNOUNCEMENT_REACTIONS:
+            self.send_json({"error": "Nieznana reakcja."}, HTTPStatus.BAD_REQUEST)
+            return
+        existing = conn.execute(
+            """
+            SELECT 1
+            FROM report_reactions
+            WHERE report_id = ? AND reaction_id = ? AND user_login = ?
+            """,
+            (report_id, reaction_id, user["login"]),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "DELETE FROM report_reactions WHERE report_id = ? AND reaction_id = ? AND user_login = ?",
+                (report_id, reaction_id, user["login"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO report_reactions(report_id, reaction_id, user_login, created_at)
+                VALUES(?, ?, ?, ?)
+                """,
+                (report_id, reaction_id, user["login"], now_text()),
+            )
+        conn.execute("UPDATE internal_reports SET updated_at = ? WHERE id = ?", (now_text(), report_id))
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'TOGGLE_REPORT_REACTION', ?)",
+            (user["login"], f"{report_id}: {reaction_id}"),
+        )
+        response = reports_snapshot(conn)
+        response["report"] = report_payload(conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone(), conn)
+        self.send_json(response)
 
     def update_report(self, conn: sqlite3.Connection, user: sqlite3.Row, report_id: str) -> None:
         report = conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone()
@@ -3796,7 +4068,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
             (user["login"], f"{report_id}: {status}"),
         )
         response = reports_snapshot(conn)
-        response["report"] = report_payload(conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone())
+        response["report"] = report_payload(conn.execute("SELECT * FROM internal_reports WHERE id = ?", (report_id,)).fetchone(), conn)
         self.send_json(response)
 
     def delete_report(self, conn: sqlite3.Connection, user: sqlite3.Row, report_id: str) -> None:

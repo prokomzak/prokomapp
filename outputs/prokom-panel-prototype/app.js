@@ -94,7 +94,7 @@ let breakActive = false;
 let startedAt = null;
 let elapsedBefore = 0;
 let timerId = null;
-let currentAnnouncementFilter = "active";
+let currentAnnouncementFilter = "all";
 let currentFeedFilter = "all";
 let currentFeedTypeFilter = "all";
 let currentTaskFilter = "all";
@@ -103,6 +103,7 @@ let currentLeaveFilter = "all";
 let kbSearchQuery = "";
 let activePostId = null;
 let activeTaskId = null;
+let openReportCommentId = null;
 let activeFeedItemId = null;
 let activeKnowledgeArticleId = null;
 let backendAvailable = false;
@@ -142,6 +143,7 @@ const presencePollIntervalMs = 5000;
 let sharedDataPollTimer = null;
 let sharedDataPollInFlight = false;
 const sharedDataPollIntervalMs = 2500;
+let statsAnimationTimer = null;
 
 const storageKeys = {
   accounts: "prokom-accounts-v3",
@@ -242,8 +244,6 @@ const feedTypeFilters = [
   { id: "time", label: "Czas pracy" },
   { id: "leaves", label: "Urlopy" },
   { id: "calendar", label: "Kalendarz" },
-  { id: "inventory", label: "Magazyn" },
-  { id: "knowledge", label: "Baza wiedzy" },
   { id: "handover", label: "Zeszyt zmiany" },
 ];
 
@@ -611,8 +611,7 @@ function currentWorkdayIndex() {
 }
 
 function effectiveTodaySeconds() {
-  const personal = timeSummary?.personal || {};
-  return Math.max(Number(personal.todaySeconds || 0), Math.floor(currentElapsed() / 1000));
+  return Math.floor(displayedTodayMs() / 1000);
 }
 
 function activeScheduleRow() {
@@ -1196,6 +1195,8 @@ function applyTimeSummary(snapshot) {
     const byLogin = new Map(snapshot.people.map((person) => [person.login, person]));
     people = people.map((person) => ({ ...person, ...(byLogin.get(person.login) || {}) }));
   }
+  syncClockStateFromCurrentPerson();
+  syncClockTimerFromTimeSummary();
   renderTimeDashboard();
   renderSchedule();
   renderWageCalculator();
@@ -1298,8 +1299,8 @@ function normalizePost(post) {
     total: Number(post.total || activePeople().length || 1),
     unread: Boolean(post.unread),
     readers: Array.isArray(post.readers) ? post.readers : [],
-    reactions: post.reactions && typeof post.reactions === "object" ? post.reactions : {},
-    comments: Array.isArray(post.comments) ? post.comments : [],
+    reactions: normalizeEntityReactions(post.reactions),
+    comments: normalizeEntityComments(post.comments),
     fileName: post.fileName || post.file_name || "",
     fileMime: post.fileMime || post.file_mime || "",
     fileSize: Number(post.fileSize || post.file_size || 0),
@@ -1321,6 +1322,95 @@ function announcementSignature(items = posts) {
       fileSize: post.fileSize,
     })),
   );
+}
+
+function makeEntityComment(body) {
+  return {
+    id: `comment-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    authorLogin: getActiveLogin(),
+    author: getActiveName(),
+    body,
+    time: new Date().toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeEntityComment(comment = {}) {
+  const authorLogin = normalizeLogin(comment.authorLogin || comment.author_login || "");
+  return {
+    id: comment.id || `comment-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    authorLogin,
+    author: comment.author || getDisplayNameByLogin(authorLogin) || "Uzytkownik",
+    body: comment.body || "",
+    time: comment.time || comment.time_label || "teraz",
+    createdAt: comment.createdAt || comment.created_at || "",
+  };
+}
+
+function normalizeEntityComments(comments) {
+  return Array.isArray(comments) ? comments.map(normalizeEntityComment).filter((comment) => comment.body) : [];
+}
+
+function normalizeEntityReactions(reactions = {}) {
+  const normalized = {};
+  postReactionTypes.forEach((reaction) => {
+    normalized[reaction.id] = Array.isArray(reactions?.[reaction.id]) ? reactions[reaction.id].filter(Boolean) : [];
+  });
+  return normalized;
+}
+
+function reactionSignature(reactions = {}) {
+  const normalized = normalizeEntityReactions(reactions);
+  return postReactionTypes.map((reaction) => [reaction.id, normalized[reaction.id]]);
+}
+
+function commentSignature(comments = []) {
+  return normalizeEntityComments(comments).map((comment) => [
+    comment.id,
+    comment.authorLogin,
+    comment.author,
+    comment.body,
+    comment.time,
+    comment.createdAt,
+  ]);
+}
+
+function renderEntityComments(comments, emptyText) {
+  const normalizedComments = normalizeEntityComments(comments);
+  if (!normalizedComments.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
+  return normalizedComments
+    .map(
+      (comment) => `
+        <article class="comment-card">
+          <header>
+            <strong>${escapeHtml(comment.author)}</strong>
+            <span class="muted">${escapeHtml(comment.time)}</span>
+          </header>
+          <p>${escapeHtml(comment.body)}</p>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderEntityReactionButtons(reactions, entityType, entityId, extraClass = "") {
+  const normalizedReactions = normalizeEntityReactions(reactions);
+  return postReactionTypes
+    .map((reaction) => {
+      const names = normalizedReactions[reaction.id] || [];
+      const active = names.includes(getActiveName());
+      return `
+        <button class="entity-reaction-button ${extraClass} ${active ? "active" : ""}" data-${entityType}-reaction="${escapeHtml(
+          entityId,
+        )}" data-reaction-id="${escapeHtml(reaction.id)}" type="button" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(
+          names.join(", ") || reaction.label,
+        )}">
+          <span>${escapeHtml(reaction.icon)}</span>
+          <span>${names.length}</span>
+        </button>
+      `;
+    })
+    .join("");
 }
 
 function applyAnnouncementSnapshot(snapshot) {
@@ -1413,6 +1503,8 @@ function normalizeTaskItem(task, fallbackColumn = "todo") {
     source: task.source || columnLabels[column] || "Zadania",
     createdAt: task.createdAt || task.created_at || "Dzisiaj",
     updatedAt: task.updatedAt || task.updated_at || "",
+    reactions: normalizeEntityReactions(task.reactions),
+    comments: normalizeEntityComments(task.comments),
   };
 }
 
@@ -1442,6 +1534,8 @@ function taskSignature(value = tasks) {
         task.description,
         task.source,
         task.updatedAt,
+        reactionSignature(task.reactions),
+        commentSignature(task.comments),
       ]),
     ),
   );
@@ -1513,6 +1607,7 @@ function normalizeReport(report) {
     title: report.title || report.category || "Zgłoszenie",
     detail: report.detail || "",
     status: normalizeReportStatus(report.status),
+    priority: report.priority || "normal",
     owner: report.owner || getDisplayNameByLogin(report.ownerLogin || report.owner_login) || getActiveName(),
     ownerLogin: normalizeLogin(report.ownerLogin || report.owner_login || ""),
     createdAt: report.createdAt || report.created_at || "teraz",
@@ -1521,6 +1616,8 @@ function normalizeReport(report) {
     fileMime,
     fileSize: Number(report.fileSize || report.file_size || 0),
     fileUrl: report.fileUrl || report.file_url || "",
+    reactions: normalizeEntityReactions(report.reactions),
+    comments: normalizeEntityComments(report.comments),
   };
 }
 
@@ -1677,6 +1774,8 @@ function reportSignature(value = reports) {
       report.updatedAt,
       report.fileName,
       report.fileSize,
+      reactionSignature(report.reactions),
+      commentSignature(report.comments),
     ]),
   );
 }
@@ -2804,6 +2903,9 @@ function normalizeTasks() {
       description: task.description || "Brak dodatkowego opisu. Uzupełnij szczegóły przy kolejnym dopracowaniu zadania.",
       source: task.source || columnLabels[column],
       createdAt: task.createdAt || "Dzisiaj",
+      updatedAt: task.updatedAt || task.updated_at || "",
+      reactions: normalizeEntityReactions(task.reactions),
+      comments: normalizeEntityComments(task.comments),
     }));
   });
 }
@@ -2812,6 +2914,12 @@ function saveTaskState() {
   normalizeTasks();
   if (backendAvailable) return;
   writeStorage(storageKeys.tasks, tasks);
+}
+
+function saveReportState() {
+  normalizeReports();
+  if (backendAvailable) return;
+  writeStorage(storageKeys.reports, reports);
 }
 
 function saveChatGroupState() {
@@ -3124,15 +3232,61 @@ function formatTimer(ms) {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+function backendTodayMs() {
+  return Math.max(0, Number(timeSummary?.personal?.todaySeconds || 0) * 1000);
+}
+
 function currentElapsed() {
-  if (!clockedIn || !startedAt) return elapsedBefore;
+  if (!clockedIn || breakActive || !startedAt) return elapsedBefore;
   return elapsedBefore + Date.now() - startedAt;
 }
 
+function displayedTodayMs() {
+  return Math.max(backendTodayMs(), currentElapsed());
+}
+
+function updateClockTicking() {
+  const shouldTick = clockedIn && !breakActive;
+  if (shouldTick && !timerId) {
+    timerId = setInterval(renderTimer, 500);
+  }
+  if (!shouldTick && timerId) {
+    clearInterval(timerId);
+    timerId = null;
+  }
+}
+
+function currentClockState() {
+  if (clockedIn) return breakActive ? "break" : "in";
+  return displayedTodayMs() ? "done" : "out";
+}
+
+function updateClockCardState() {
+  $$(".clock-card").forEach((card) => {
+    card.dataset.clockState = currentClockState();
+  });
+}
+
+function renderDashboardClockMeta() {
+  const meta = $("#dashboardClockMeta");
+  if (!meta) return;
+  const entries = Array.isArray(timeSummary?.personal?.dayLog) ? timeSummary.personal.dayLog : [];
+  const activeEntry = entries.find((entry) => entry.status === "W toku") || entries.at(-1);
+  const parts = [];
+  if (activeEntry?.start) parts.push(`Start ${activeEntry.start}`);
+  const breakSeconds = Number(activeEntry?.breakSeconds || 0);
+  if (breakSeconds) parts.push(`Przerwa ${formatWorkDuration(breakSeconds)}`);
+  parts.push(`Dziś ${formatTimer(displayedTodayMs())}`);
+  parts.push("cel 8h");
+  meta.textContent = parts.join(" · ");
+}
+
 function renderTimer() {
-  const value = formatTimer(currentElapsed());
+  const value = formatTimer(displayedTodayMs());
   $("#liveTimer").textContent = value;
   $("#timeHeroTimer").textContent = value;
+  updateClockCardState();
+  renderDashboardClockMeta();
   renderTopbarWorkCounter();
   renderTimeKpiTiles();
   renderTimeWeekChart();
@@ -3140,7 +3294,7 @@ function renderTimer() {
 }
 
 function updateClockControls() {
-  $(".clock-card")?.setAttribute("data-clock-state", clockedIn ? (breakActive ? "break" : "in") : "out");
+  updateClockCardState();
   $("#clockStatus").textContent = clockedIn ? (breakActive ? "Przerwa" : "W pracy") : "Niewbity";
   $("#timeHeroStatus").textContent = clockedIn
     ? breakActive
@@ -3169,19 +3323,35 @@ function syncClockStateFromCurrentPerson() {
   const nextClockedIn = ["work", "break"].includes(person.state);
   const nextBreakActive = person.state === "break";
   if (clockedIn !== nextClockedIn || breakActive !== nextBreakActive) {
+    const currentMs = displayedTodayMs();
     clockedIn = nextClockedIn;
     breakActive = nextBreakActive;
-    if (clockedIn && !startedAt) startedAt = Date.now();
-    if (!clockedIn) {
+    elapsedBefore = Math.max(backendTodayMs(), currentMs);
+    if (clockedIn && !breakActive) {
+      startedAt = Date.now();
+    } else {
       startedAt = null;
-      if (timerId) clearInterval(timerId);
-      timerId = null;
-    } else if (!timerId) {
-      timerId = setInterval(renderTimer, 500);
+    }
+    if (!clockedIn) {
+      elapsedBefore = Math.max(elapsedBefore, backendTodayMs());
     }
   }
+  updateClockTicking();
   updateClockControls();
   renderTimer();
+}
+
+function syncClockTimerFromTimeSummary() {
+  const backendMs = backendTodayMs();
+  if (clockedIn && !breakActive) {
+    elapsedBefore = backendMs;
+    startedAt = Date.now();
+  } else {
+    elapsedBefore = backendMs;
+    startedAt = null;
+  }
+  updateClockTicking();
+  updateClockControls();
 }
 
 async function savePresenceState() {
@@ -3203,18 +3373,18 @@ async function savePresenceState() {
 
 async function toggleClock() {
   if (!clockedIn) {
+    elapsedBefore = Math.max(elapsedBefore, backendTodayMs());
     clockedIn = true;
     breakActive = false;
     startedAt = Date.now();
-    if (!timerId) timerId = setInterval(renderTimer, 500);
+    updateClockTicking();
     setCurrentPersonPresence("work");
   } else {
-    elapsedBefore = currentElapsed();
+    elapsedBefore = displayedTodayMs();
     clockedIn = false;
     breakActive = false;
     startedAt = null;
-    if (timerId) clearInterval(timerId);
-    timerId = null;
+    updateClockTicking();
     setCurrentPersonPresence("out");
   }
   updateClockControls();
@@ -3224,9 +3394,18 @@ async function toggleClock() {
 
 async function toggleBreak() {
   if (!clockedIn) return;
-  breakActive = !breakActive;
+  if (!breakActive) {
+    elapsedBefore = displayedTodayMs();
+    breakActive = true;
+    startedAt = null;
+  } else {
+    breakActive = false;
+    startedAt = Date.now();
+  }
+  updateClockTicking();
   setCurrentPersonPresence(breakActive ? "break" : "work");
   updateClockControls();
+  renderTimer();
   await savePresenceState();
 }
 
@@ -3265,9 +3444,41 @@ function addMyDayItem(event) {
   showToast("Dodano wpis", title);
 }
 
+function personAcceptedLeaveRequests(person) {
+  const login = normalizeLogin(person?.login || "");
+  const name = String(person?.name || "").trim();
+  return leaveRequests().filter((request) => {
+    const sameLogin = login && normalizeLogin(request.ownerLogin || "") === login;
+    const sameName = name && request.owner === name;
+    return request.status === "Zaakceptowane" && (sameLogin || sameName);
+  });
+}
+
+function personUsedLeaveDays(person) {
+  return personAcceptedLeaveRequests(person).reduce((sum, request) => sum + parseLeaveDetail(request.detail).days, 0);
+}
+
+function personIsOnLeaveToday(person) {
+  const today = formatDateInput(new Date());
+  const status = String(person?.status || "").toLowerCase();
+  if (status.includes("urlop")) return true;
+  return personAcceptedLeaveRequests(person).some((request) => {
+    const detail = parseLeaveDetail(request.detail);
+    return detail.from && detail.to && detail.from <= today && today <= detail.to;
+  });
+}
+
+function teamStatusInfo(person) {
+  if (personIsOnLeaveToday(person)) return { label: "Urlop", className: "leave" };
+  if (person?.state === "work") return { label: "W pracy", className: "on" };
+  if (person?.state === "break") return { label: "Przerwa", className: "break" };
+  return { label: presenceStatusForState(person?.state, person?.active), className: "off" };
+}
+
 function renderPeople() {
   const visiblePeople = activePeople();
   const workingPeople = visiblePeople.filter((person) => ["work", "break"].includes(person.state));
+  const leavePeople = visiblePeople.filter((person) => personIsOnLeaveToday(person));
   const small = workingPeople.length
     ? workingPeople
     .map(
@@ -3289,20 +3500,29 @@ function renderPeople() {
   $("#peopleTodayCount").textContent = `${workingPeople.length} osób`;
   const timeWorkingCount = $("#timeWorkingCount");
   if (timeWorkingCount) timeWorkingCount.textContent = String(workingPeople.length);
+  const teamPeopleCount = $("#teamPeopleCount");
+  if (teamPeopleCount) teamPeopleCount.textContent = String(visiblePeople.length);
+  const teamWorkingPeopleCount = $("#teamWorkingPeopleCount");
+  if (teamWorkingPeopleCount) teamWorkingPeopleCount.textContent = String(workingPeople.length);
+  const teamLeavePeopleCount = $("#teamLeavePeopleCount");
+  if (teamLeavePeopleCount) teamLeavePeopleCount.textContent = String(leavePeople.length);
   $("#teamGrid").innerHTML = visiblePeople
     .map(
-      (person) => `
+      (person) => {
+        const status = teamStatusInfo(person);
+        const usedLeaveDays = Math.min(26, personUsedLeaveDays(person));
+        return `
         <article class="team-card">
-          <div class="avatar">${escapeHtml(person.initials)}</div>
+          <div class="avatar team-avatar-${escapeHtml(slugifyLogin(person.login || person.name))}">${escapeHtml(person.initials)}</div>
           <div class="meta">
             <strong>${escapeHtml(person.name)}</strong>
             <span class="muted">${escapeHtml(person.role)}</span>
-            <span>${escapeHtml(person.status)}</span>
-            <span class="muted">Urlop: ${person.name === "Paweł" ? "12/26" : "18/26"} dni</span>
+            <span class="muted">Urlop: ${usedLeaveDays}/26 dni</span>
           </div>
-          <span class="status-dot ${statusDotClass(person.state)}"></span>
+          <span class="team-status-pill ${status.className}">${escapeHtml(status.label)}</span>
         </article>
-      `,
+      `;
+      },
     )
     .join("");
 
@@ -3335,7 +3555,7 @@ function renderAccountManagement() {
       const active = account.active !== false;
       return `
         <article class="account-management-card ${active ? "" : "inactive"}">
-          <div class="avatar">${escapeHtml(account.initials)}</div>
+          <div class="avatar team-avatar-${escapeHtml(slugifyLogin(account.login || account.name))}">${escapeHtml(account.initials)}</div>
           <div class="meta">
             <strong>${escapeHtml(account.name)}</strong>
             <span class="muted">${escapeHtml(account.login)} · ${account.role === "admin" ? "admin" : "pracownik"} · ${escapeHtml(
@@ -3641,8 +3861,7 @@ function postReadClass(post) {
 }
 
 function postAuthorInitials(post) {
-  const person = getPersonByLogin(post.authorLogin);
-  return person?.initials || makeInitials(post.author);
+  return getInitialsByLogin(post.authorLogin, post.author);
 }
 
 function ensurePostSocial(post) {
@@ -3673,6 +3892,31 @@ function reactionSummary(post) {
     .map((reaction) => `${reaction.icon} ${post.reactions[reaction.id].length}`)
     .join(" · ");
   return `${active} · ${commentsLabel(post.comments.length)}`;
+}
+
+function announcementPostMatchesFilter(post) {
+  if (currentAnnouncementFilter === "urgent") return post.priority === "urgent";
+  if (currentAnnouncementFilter === "important") return post.priority === "important";
+  if (currentAnnouncementFilter === "mine") {
+    return normalizeLogin(post.authorLogin) === getActiveLogin() || post.author === getActiveName();
+  }
+  if (currentAnnouncementFilter === "unread") return Boolean(post.unread);
+  return true;
+}
+
+function isPinnedAnnouncementPost(post) {
+  return post.priority === "urgent" || (post.priority === "important" && post.unread);
+}
+
+function renderAnnouncementReactionChips(post) {
+  ensurePostSocial(post);
+  return [
+    ...postReactionTypes.map(
+      (reaction) =>
+        `<span class="announcement-reaction-chip">${escapeHtml(reaction.icon)} ${post.reactions[reaction.id].length}</span>`,
+    ),
+    `<span class="announcement-reaction-chip">💬 ${post.comments.length}</span>`,
+  ].join("");
 }
 
 function activitySortValue(value, fallback) {
@@ -3855,7 +4099,7 @@ function buildActivityFeedItems() {
         actorLogin: post.authorLogin,
         target: { view: "announcements", postId: post.id },
         actionLabel: "Otwórz ogłoszenie",
-        extraHtml: `${renderPostAttachment(post)}<div class="post-social-summary"><span>${reactionSummary(post)}</span></div>`,
+        extraHtml: renderPostAttachment(post),
       };
     }),
     ...reports.map((report, index) => ({
@@ -3992,12 +4236,15 @@ function buildActivityFeedItems() {
       actionLabel: "Przejdź do notatki",
     })),
   ];
-  return rawItems.sort((a, b) => b.sortValue - a.sortValue);
+  return rawItems
+    .filter((item) => !["inventory", "knowledge"].includes(item.category))
+    .sort((a, b) => b.sortValue - a.sortValue);
 }
 
 function feedItemMatchesModeFilter(item) {
   if (currentFeedFilter === "boss") return item.fromAdmin;
   if (currentFeedFilter === "urgent") return item.attention || item.color === "red" || /piln/i.test(item.pill || "");
+  if (currentFeedFilter === "important") return item.color === "amber" || /ważn|wazn/i.test(item.pill || item.meta || "");
   if (currentFeedFilter === "mine") return normalizeLogin(item.actorLogin || "") === getActiveLogin();
   if (currentFeedFilter === "unread") return item.unread || item.attention;
   return true;
@@ -4007,9 +4254,24 @@ function feedItemMatchesTypeFilter(item) {
   return currentFeedTypeFilter === "all" || item.category === currentFeedTypeFilter;
 }
 
-function renderActivityFeedItem(item) {
+function feedStatusTagClass(item) {
+  const color = String(item.color || "").toLowerCase();
+  if (["red", "amber", "green", "teal", "violet"].includes(color)) return `status-${color}`;
+  const label = normalizeSearch(item.pill || "");
+  if (label.includes("zalatw") || label.includes("zrob") || label.includes("potwierdz") || label.includes("ok")) {
+    return "status-green";
+  }
+  if (label.includes("przyj") || label.includes("trakcie") || label.includes("rsvp")) return "status-teal";
+  if (label.includes("oczek") || label.includes("sprawdz") || label.includes("uwag")) return "status-amber";
+  if (label.includes("piln") || label.includes("niski") || label.includes("nowe")) return "status-red";
+  return "status-violet";
+}
+
+function renderActivityFeedItemLegacy(item) {
   const authorName = item.actorLogin ? getDisplayNameByLogin(item.actorLogin) : item.type || "PRO-KOM";
-  const initials = makeInitials(authorName || item.type || "PK");
+  const initials = getInitialsByLogin(item.actorLogin, authorName || item.type || "PK");
+  const statusLabel = item.pill || (item.unread ? "Do odczytu" : "Aktualne");
+  const statusClass = feedStatusTagClass(item);
   const tagClass =
     item.category === "announcements"
       ? "t-ann"
@@ -4025,12 +4287,13 @@ function renderActivityFeedItem(item) {
   return `
     <article class="item feed-card ${item.unread || item.attention ? "attention" : ""} ${item.pinned ? "pinned" : ""}">
       <div class="item-top feed-card-top">
-        <div class="av source-feed-avatar">${escapeHtml(initials)}</div>
+        <div class="av source-feed-avatar" aria-label="Autor: ${escapeHtml(authorName)}" title="${escapeHtml(authorName)}">${escapeHtml(initials)}</div>
         <div class="source-feed-author">
           <strong>${escapeHtml(authorName)}</strong>
           <span>${escapeHtml(item.time)}</span>
         </div>
         <span class="tag ${tagClass}">${escapeHtml(item.type)}</span>
+        <span class="tag source-status-tag ${statusClass}">${escapeHtml(statusLabel)}</span>
         ${item.fresh ? `<span class="feed-new-indicator" title="Nowy wpis od ostatniej wizyty" aria-label="Nowy wpis"></span>` : ""}
         ${item.pinned ? `<span class="state s-todo">Przypięte</span>` : ""}
         <span class="source-card-menu">...</span>
@@ -4044,7 +4307,6 @@ function renderActivityFeedItem(item) {
         <button class="rbtn" data-feed-pin="${escapeHtml(item.id)}" type="button">${item.pinned ? "📌" : "📍"}</button>
         <button class="rbtn" data-feed-detail="${escapeHtml(item.id)}" type="button">💬 0</button>
         <span class="rbtn ${item.unread ? "" : "on"}">${item.unread ? "Do odczytu" : "✓ Odczytane"}</span>
-        <span class="readr">${escapeHtml(item.pill)}</span>
         <button class="mini" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
         <button class="mini" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
       </div>
@@ -4073,6 +4335,135 @@ function renderActivityFeedItem(item) {
         }</button>
         <button class="secondary-button" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
         <button class="secondary-button" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
+      </div>
+    </article>
+  `;
+}
+
+function getFeedAnnouncementPost(item) {
+  if (item?.category !== "announcements") return null;
+  const postId = item.target?.postId || String(item.id || "").replace(/^post:/, "");
+  return getPostById(postId);
+}
+
+function renderActivityFeedReactions(item) {
+  const pinButton = `<button class="rbtn feed-pin-button" data-feed-pin="${escapeHtml(item.id)}" type="button" aria-label="${
+    item.pinned ? "Odepnij wpis" : "Przypnij wpis"
+  }">${item.pinned ? "&#128204;" : "&#128205;"}</button>`;
+  const post = getFeedAnnouncementPost(item);
+  if (!post) {
+    const task = item.category === "tasks" ? getTaskRef(item.target?.taskId)?.task : null;
+    const report = item.category === "reports" ? getReportById(item.target?.reportId) : null;
+    if (task) {
+      const commentsCount = normalizeEntityComments(task.comments).length;
+      return `${pinButton}${renderEntityReactionButtons(
+        task.reactions,
+        "task",
+        task.id,
+        "rbtn feed-reaction-button",
+      )}<button class="rbtn feed-comment-count" data-task-comment="${escapeHtml(
+        task.id,
+      )}" type="button" aria-label="Dodaj komentarz do zadania">&#128172; ${commentsCount}</button>`;
+    }
+    if (report) {
+      const commentsCount = normalizeEntityComments(report.comments).length;
+      return `${pinButton}${renderEntityReactionButtons(
+        report.reactions,
+        "report",
+        report.id,
+        "rbtn feed-reaction-button",
+      )}<button class="rbtn feed-comment-count" data-report-comment="${escapeHtml(
+        report.id,
+      )}" type="button" aria-label="Dodaj komentarz do zgłoszenia">&#128172; ${commentsCount}</button>`;
+    }
+    return `${pinButton}<button class="rbtn feed-comment-count" data-feed-detail="${escapeHtml(
+      item.id,
+    )}" type="button" aria-label="Komentarze">&#128172; 0</button>`;
+  }
+  const reactionButtons = postReactionTypes
+    .map((reaction) => {
+      const names = post.reactions?.[reaction.id] || [];
+      const active = names.includes(getActiveName());
+      return `
+        <button class="rbtn feed-reaction-button ${active ? "on" : ""}" data-feed-post="${escapeHtml(
+          post.id,
+        )}" data-feed-reaction="${escapeHtml(reaction.id)}" type="button" aria-pressed="${active ? "true" : "false"}" title="${escapeHtml(
+          names.join(", ") || reaction.label,
+        )}">
+          <span>${escapeHtml(reaction.icon)}</span>
+          <span>${names.length}</span>
+        </button>
+      `;
+    })
+    .join("");
+  const commentsCount = post.comments?.length || 0;
+  return `${pinButton}${reactionButtons}<button class="rbtn feed-comment-count" data-feed-comment="${escapeHtml(
+    post.id,
+  )}" type="button" aria-label="Dodaj komentarz">&#128172; ${commentsCount}</button>`;
+}
+
+function renderActivityFeedReadAction(item) {
+  const post = getFeedAnnouncementPost(item);
+  if (!post) {
+    return `<span class="rbtn readr ${item.unread ? "" : "on"}">${item.unread ? "Do odczytu" : "✓ Odczytane"}</span>`;
+  }
+  const isRead = !post.unread;
+  if (isRead) {
+    return `<span class="rbtn readr on">✓ Odczytane</span>`;
+  }
+  return `
+    <span class="rbtn readr">Do odczytu</span>
+    <button class="mini feed-read-button" data-feed-read="${escapeHtml(post.id)}" type="button">
+      Potwierdź odczyt
+    </button>
+  `;
+}
+
+function renderActivityFeedItem(item) {
+  const authorName = item.actorLogin ? getDisplayNameByLogin(item.actorLogin) : item.type || "PRO-KOM";
+  const initials = getInitialsByLogin(item.actorLogin, authorName || item.type || "PK");
+  const statusLabel = item.pill || (item.unread ? "Do odczytu" : "Aktualne");
+  const statusClass = feedStatusTagClass(item);
+  const tagClass =
+    item.category === "announcements"
+      ? "t-ann"
+      : item.category === "reports"
+        ? "t-rep"
+        : item.category === "tasks"
+          ? "t-task"
+          : item.category === "calendar" || item.category === "time"
+            ? "t-cal"
+            : item.category === "knowledge"
+              ? "t-ann"
+              : "t-mag";
+  return `
+    <article class="item feed-card ${item.unread || item.attention ? "attention" : ""} ${item.pinned ? "pinned" : ""}">
+      <div class="item-top feed-card-top">
+        <div class="av source-feed-avatar" aria-label="Autor: ${escapeHtml(authorName)}" title="${escapeHtml(authorName)}">${escapeHtml(initials)}</div>
+        <div class="source-feed-author">
+          <strong>${escapeHtml(authorName)}</strong>
+          <span>${escapeHtml(item.time)}</span>
+        </div>
+        <span class="tag ${tagClass}">${escapeHtml(item.type)}</span>
+        <span class="tag source-status-tag ${statusClass}">${escapeHtml(statusLabel)}</span>
+        ${item.fresh ? `<span class="feed-new-indicator" title="Nowy wpis od ostatniej wizyty" aria-label="Nowy wpis"></span>` : ""}
+        ${item.pinned ? `<span class="state s-todo">Przypięte</span>` : ""}
+        <span class="source-card-menu">...</span>
+      </div>
+      <h4>${escapeHtml(item.title)}</h4>
+      <p>${escapeHtml(item.body)}</p>
+      <div class="source-card-line"></div>
+      <div class="feed-meta sub">${escapeHtml(item.meta)}</div>
+      ${item.extraHtml || ""}
+      <div class="item-actions feed-card-actions">
+        <div class="feed-reaction-group">
+          ${renderActivityFeedReactions(item)}
+        </div>
+        <div class="feed-card-action-group">
+          ${renderActivityFeedReadAction(item)}
+          <button class="mini" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
+          <button class="mini" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
+        </div>
       </div>
     </article>
   `;
@@ -4184,44 +4575,71 @@ function renderPosts(filter = "all") {
     : `<div class="empty-state">Brak aktywności pasującej do wybranego filtra.</div>`;
   scheduleFeedItemsSeen(feedItems, allFeedItems);
   renderUrgentStrip();
-  const composerAvatar = $("#announcementComposerAvatar");
-  if (composerAvatar) composerAvatar.textContent = makeInitials(getActiveName());
-
-  const announcementPosts = posts.filter((post) => {
-    if (currentAnnouncementFilter === "urgent") return post.priority === "urgent";
-    if (currentAnnouncementFilter === "mine") return post.author === getActiveName();
-    return true;
+  $$("[data-announcement-composer-avatar]").forEach((avatar) => {
+    const activeName = getActiveName();
+    avatar.textContent = getInitialsByLogin(getActiveLogin(), activeName);
+    avatar.title = activeName;
+    avatar.setAttribute("aria-label", `Autor ogłoszenia: ${activeName}`);
   });
 
-  $("#announcementList").innerHTML = announcementPosts
-    .map((post) => {
-      ensurePostSocial(post);
-      const [label, color] = priorityLabel(post.priority);
-      const attachmentHtml = renderPostAttachment(post);
-      return `
-        <article class="announcement-card announcement-item ${postPriorityClass(post.priority)} ${postReadClass(post)}" data-author-initials="${escapeHtml(
-          postAuthorInitials(post),
-        )}" data-announcement-time="${escapeHtml(activityTimeLabel(post.createdAt, post.unread ? "nieodczytane" : "ogłoszenie"))}">
-          <div class="widget-header">
-            <strong>${escapeHtml(post.title)}</strong>
-            <span class="announcement-card-meta">
-              <span class="pill ${color}">${label}</span>
-              <time>${escapeHtml(activityTimeLabel(post.createdAt, post.unread ? "nieodczytane" : "ogłoszenie"))}</time>
-            </span>
-          </div>
-          <p class="note">${escapeHtml(post.body)}</p>
-          ${attachmentHtml}
-          <div class="read-status">
-            <span>Autor: ${escapeHtml(post.author)}</span>
-            <span>Odczytali ${post.read}/${post.total}</span>
-            <span>${post.unread ? "Nieprzeczytane przez część zespołu" : "Potwierdzone"}</span>
-          </div>
-          <div class="post-social-summary"><span>${reactionSummary(post)}</span></div>
-          <button data-open-post="${post.id}" type="button">Odczyty i komentarze</button>
-        </article>
-      `;
-    })
-    .join("");
+  const announcementPosts = posts.map(ensurePostSocial).filter(announcementPostMatchesFilter);
+  const pinnedAnnouncementPosts = announcementPosts.filter(isPinnedAnnouncementPost);
+  const regularAnnouncementPosts = announcementPosts.filter((post) => !isPinnedAnnouncementPost(post));
+  const renderAnnouncementPost = (post) => {
+    const [label, color] = priorityLabel(post.priority);
+    const attachmentHtml = renderPostAttachment(post);
+    const authorName = post.author || getDisplayNameByLogin(post.authorLogin);
+    const timeLabel = activityTimeLabel(post.createdAt, post.unread ? "nieodczytane" : "ogłoszenie");
+    const likeCount = post.reactions.like?.length || 0;
+    const doneCount = post.reactions.done?.length || 0;
+    const questionCount = post.reactions.question?.length || 0;
+    const commentsCount = post.comments.length;
+    const readActionLabel = post.unread ? "Potwierdź odczyt" : "Odczytane";
+    const discussionLabel = post.unread || commentsCount ? "Odczyty i komentarze" : "Komentarze";
+    return `
+      <article class="announcement-card announcement-item ${postPriorityClass(post.priority)} ${postReadClass(post)} ${
+        isPinnedAnnouncementPost(post) ? "is-pinned" : ""
+      }" data-announcement-time="${escapeHtml(timeLabel)}">
+        <div class="announcement-reference-top">
+          <span class="pill ${color}">${escapeHtml(label)}</span>
+          <time>${escapeHtml(timeLabel)}</time>
+        </div>
+        <h3>${escapeHtml(post.title)}</h3>
+        <p class="note">${escapeHtml(post.body)}</p>
+        <div class="announcement-reference-meta">
+          <span>${escapeHtml(authorName)}</span>
+          <span>odczytali ${post.read}/${post.total}</span>
+          <span>👍 ${likeCount}</span>
+          <span>✅ ${doneCount} potwierdzenia</span>
+          <span>❔ ${questionCount}</span>
+          <span>💬 ${commentsCount}</span>
+        </div>
+        ${attachmentHtml}
+        <div class="announcement-reference-actions">
+          <button class="announcement-read-chip ${post.unread ? "" : "is-read"}" data-open-post="${post.id}" type="button">${escapeHtml(
+            readActionLabel,
+          )}</button>
+          <button class="announcement-read-chip" data-open-post="${post.id}" type="button">${escapeHtml(discussionLabel)}</button>
+        </div>
+      </article>
+    `;
+  };
+  const renderAnnouncementSection = (label, items, pinned = false) =>
+    items.length
+      ? `
+        <div class="announcement-section-divider ${pinned ? "is-pinned" : ""}">
+          <span>${pinned ? "📌 " : ""}${label}</span>
+        </div>
+        ${items.map(renderAnnouncementPost).join("")}
+      `
+      : "";
+
+  $("#announcementList").innerHTML = announcementPosts.length
+    ? `${renderAnnouncementSection("Przypięte", pinnedAnnouncementPosts, true)}${renderAnnouncementSection(
+        pinnedAnnouncementPosts.length ? "Pozostałe" : "Ogłoszenia",
+        regularAnnouncementPosts,
+      )}`
+    : `<div class="empty-state">Brak ogłoszeń pasujących do wybranego filtra.</div>`;
   renderNotifications();
 }
 
@@ -4231,9 +4649,15 @@ function renderKanban() {
     .map(
       ([column, items]) => `
         <section class="kanban-column" data-column="${column}">
-          <h3>${columnLabels[column]} <span class="pill">${
-            items.filter((task) => taskMatchesFilter(task)).length
-          }</span></h3>
+          <header class="kanban-column-header">
+            <div class="kanban-column-title">
+              <span class="task-column-dot" aria-hidden="true"></span>
+              <h3>${columnLabels[column]} <span class="kanban-count">${
+                items.filter((task) => taskMatchesFilter(task)).length
+              }</span></h3>
+            </div>
+            <button class="task-column-add" data-open-task-form data-task-column="${column}" type="button" aria-label="Dodaj zadanie">+</button>
+          </header>
           ${items
             .map((task, index) => ({ task, index }))
             .filter(({ task }) => taskMatchesFilter(task))
@@ -4244,6 +4668,9 @@ function renderKanban() {
               const doneActions = isDone
                 ? `<button class="secondary-button" data-task-reopen="${task.id}" type="button">Cofnij</button>`
                 : "";
+              const ownerInitials = getInitialsByLogin(task.ownerLogin, task.owner);
+              const visibleCount = items.filter((visibleTask) => taskMatchesFilter(visibleTask)).length;
+              const progressLabel = `${Math.min(index + 1, Math.max(visibleCount, 1))}/${Math.max(visibleCount, 1)}`;
               return `
                 <article class="${taskClasses}" draggable="true" data-column="${column}" data-index="${index}" data-task-id="${
                   task.id
@@ -4253,8 +4680,18 @@ function renderKanban() {
                   </button>
                   <p class="task-summary">${escapeHtml(task.description)}</p>
                   <div class="task-meta">
-                    <span>${escapeHtml(task.owner)} · <span class="task-due">${escapeHtml(task.due)}</span></span>
-                    <span class="pill ${color}">${label}</span>
+                    <span class="task-owner-avatar" aria-label="Właściciel: ${escapeHtml(task.owner)}" title="${escapeHtml(
+                      task.owner,
+                    )}">${escapeHtml(ownerInitials)}</span>
+                    <span class="task-due">${escapeHtml(task.due)}</span>
+                    <span class="task-progress">${escapeHtml(progressLabel)}</span>
+                    <button class="entity-comment-button task-comments" data-task-comment="${escapeHtml(
+                      task.id,
+                    )}" type="button" title="Dodaj komentarz">&#128172; ${normalizeEntityComments(task.comments).length}</button>
+                    <span class="pill task-priority-pill ${color}">${label}</span>
+                  </div>
+                  <div class="entity-social-row task-social-row">
+                    ${renderEntityReactionButtons(task.reactions, "task", task.id)}
                   </div>
                   <label class="task-mobile-move">Przenieś do
                     <select data-task-move="${task.id}">
@@ -4320,13 +4757,14 @@ function renderTaskOwnerOptions(selectedOwner = getActiveName()) {
   }
 }
 
-function openTaskForm() {
+function openTaskForm(column = "todo") {
+  const targetColumn = typeof column === "string" && tasks[column] ? column : "todo";
   renderTaskOwnerOptions();
   $("#taskForm").reset();
   $("#taskOwnerInput").value = activePeople().some((person) => person.login === getActiveLogin())
     ? getActiveLogin()
     : activePeople()[0]?.login || "";
-  $("#taskColumnInput").value = "todo";
+  $("#taskColumnInput").value = targetColumn;
   $("#taskPriorityInput").value = "normal";
   $("#taskDueInput").value = "dziś";
   openDialog("#taskFormDialog");
@@ -4377,6 +4815,9 @@ async function createTask(event) {
     description: description || "Brak dodatkowego opisu.",
     source: "Dodane ręcznie",
     createdAt: "teraz",
+    updatedAt: "teraz",
+    reactions: normalizeEntityReactions(),
+    comments: [],
   });
   saveTaskState();
   renderKanban();
@@ -4411,6 +4852,8 @@ async function addTaskToBoard(task, column = "todo") {
   tasks[column].unshift({
     id: makeTaskId(),
     ownerLogin: normalizeLogin(task.ownerLogin || activePeople().find((person) => person.name === task.owner)?.login || ""),
+    reactions: normalizeEntityReactions(task.reactions),
+    comments: [],
     ...task,
   });
   saveTaskState();
@@ -4432,9 +4875,127 @@ function openTaskDetails(taskId) {
   $("#taskDialogPriority").className = `pill ${priorityColor}`;
   $("#taskDialogSource").textContent = ref.task.source || columnLabels[ref.column];
   $("#taskDialogCreated").textContent = ref.task.createdAt || "Dzisiaj";
+  $("#taskReactionBar").innerHTML = renderEntityReactionButtons(ref.task.reactions, "task", ref.task.id);
+  const taskComments = normalizeEntityComments(ref.task.comments);
+  $("#taskCommentCount").textContent = taskComments.length;
+  $("#taskComments").innerHTML = renderEntityComments(taskComments, "Brak komentarzy do zadania.");
+  const taskCommentInput = $("#taskCommentInput");
+  if (taskCommentInput.dataset.taskId !== String(ref.task.id)) taskCommentInput.value = "";
+  taskCommentInput.dataset.taskId = String(ref.task.id);
+  const taskCommentForm = $("#taskCommentForm");
+  if (taskCommentForm) taskCommentForm.dataset.taskCommentForm = String(ref.task.id);
   const activeReopenButton = $("[data-task-reopen-active]");
   if (activeReopenButton) activeReopenButton.classList.toggle("hidden", ref.column !== "done");
   openDialog("#taskDialog");
+}
+
+function focusTaskCommentInput() {
+  window.setTimeout(() => $("#taskCommentInput")?.focus(), 80);
+}
+
+function openTaskComments(taskId) {
+  openTaskDetails(taskId);
+  focusTaskCommentInput();
+}
+
+function openReportComments(reportId) {
+  openReportCommentId = String(reportId);
+  const focusForm = () => {
+    const form = $$("[data-report-comment-form]").find((item) => String(item.dataset.reportCommentForm) === String(reportId));
+    if (!form) return false;
+    const reportsView = $("#reports");
+    if (!reportsView?.classList.contains("active-view")) return false;
+    const card = form.closest(".report-card");
+    const section = form.closest(".report-comment-section");
+    section?.classList.add("is-open");
+    card?.classList.add("comment-focus");
+    form.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => form.querySelector("input[name='body']")?.focus(), 120);
+    window.setTimeout(() => card?.classList.remove("comment-focus"), 1400);
+    return true;
+  };
+  const report = getReportById(reportId);
+  currentReportFilter = report && reportIsClosed(report) ? "closed" : "open";
+  $$("[data-report-filter]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.reportFilter === currentReportFilter);
+  });
+  activateView("reports");
+  renderReportState();
+  if (!focusForm()) window.setTimeout(focusForm, 180);
+}
+
+function toggleLocalEntityReaction(entity, reactionId) {
+  entity.reactions = normalizeEntityReactions(entity.reactions);
+  const reactions = entity.reactions[reactionId];
+  if (!reactions) return false;
+  const activeName = getActiveName();
+  if (reactions.includes(activeName)) {
+    entity.reactions[reactionId] = reactions.filter((name) => name !== activeName);
+  } else {
+    reactions.push(activeName);
+  }
+  entity.updatedAt = "teraz";
+  return true;
+}
+
+async function toggleTaskReaction(taskId, reactionId) {
+  const ref = getTaskRef(taskId);
+  if (!ref) return;
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/tasks/${encodeURIComponent(ref.task.id)}/reactions`, {
+        method: "POST",
+        body: JSON.stringify({ reactionId }),
+      });
+      applyTaskSnapshot(result);
+      renderTaskState();
+      showToast("Reakcja zapisana", ref.task.title);
+      return;
+    } catch (error) {
+      showToast("Nie zapisano reakcji", error.message || "Backend odrzucil zmiane.");
+      return;
+    }
+  }
+  if (!toggleLocalEntityReaction(ref.task, reactionId)) return;
+  saveTaskState();
+  renderTaskState();
+  showToast("Reakcja zapisana", ref.task.title);
+}
+
+async function createTaskComment(event) {
+  event.preventDefault();
+  const form = event.currentTarget || event.target;
+  const input = $("#taskCommentInput");
+  const taskId = form?.dataset.taskCommentForm || input?.dataset.taskId || activeTaskId;
+  const ref = getTaskRef(taskId);
+  const body = input?.value.trim();
+  if (!ref || !body) return;
+  activeTaskId = ref.task.id;
+
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/tasks/${encodeURIComponent(ref.task.id)}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+      input.value = "";
+      applyTaskSnapshot(result);
+      renderTaskState();
+      showToast("Komentarz dodany", "Jest zapisany przy zadaniu.");
+      return;
+    } catch (error) {
+      showToast("Nie dodano komentarza", error.message || "Backend odrzucil zapis.");
+      return;
+    }
+  }
+
+  ref.task.comments = normalizeEntityComments(ref.task.comments);
+  ref.task.comments.push(makeEntityComment(body));
+  ref.task.updatedAt = "teraz";
+  input.value = "";
+  saveTaskState();
+  renderTaskState();
+  showToast("Komentarz dodany", "Widać go w szczegółach zadania.");
 }
 
 async function deleteTask(taskId) {
@@ -4486,8 +5047,32 @@ async function moveTask(taskId, nextColumn) {
 
 function taskMatchesFilter(task) {
   if (currentTaskFilter === "mine") return task.ownerLogin === getActiveLogin() || task.owner === getActiveName();
+  if (currentTaskFilter === "urgent") return task.priority === "urgent";
   if (currentTaskFilter === "person") return task.ownerLogin === "kuba" || task.owner === "Kuba";
   return true;
+}
+
+function formatCompactWorkDuration(seconds = 0) {
+  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  if (!hours && !minutes) return "—";
+  if (!minutes) return `${hours}h`;
+  return `${hours}h${String(minutes).padStart(2, "0")}`;
+}
+
+function scheduleCellDisplayValue(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "—";
+  const parsed = parseScheduleValue(text);
+  if (parsed.mode === "work") return formatCompactWorkDuration(scheduleValueSeconds(text));
+  return scheduleNoteLabels[parsed.mode] || text;
+}
+
+function scheduleHeaderLabel(day) {
+  const date = localDateFromInput(day.isoDate);
+  const dayNumber = date ? String(date.getDate()).padStart(2, "0") : String(day.date || "").split(".")[0] || "";
+  return `${String(day.label || "").toUpperCase()} ${dayNumber}`.trim();
 }
 
 function renderSchedule() {
@@ -4530,13 +5115,17 @@ function renderSchedule() {
     label.textContent = weekRangeLabel;
   });
   const canEdit = role === "admin";
+  const headerCells = days
+    .map((day) => `<div class="schedule-reference-head-cell">${escapeHtml(scheduleHeaderLabel(day))}</div>`)
+    .join("");
   const bodyRows = rows
     .map((row) => {
       const rowCells = days
         .map((day) => {
           const cell = row.cells?.find((item) => item.day === day.key) || { value: "" };
           const value = cell.value || "";
-          const displayValue = scheduleDisplayValue(value);
+          const displayValue = scheduleCellDisplayValue(value);
+          const fullDisplayValue = scheduleDisplayValue(value);
           const cellClass = scheduleCellClass(value);
           const label = day.isoDate || day.date || day.label;
           return `${
@@ -4550,17 +5139,12 @@ function renderSchedule() {
                 )}" data-schedule-value="${escapeHtml(value)}" data-schedule-label="${escapeHtml(
                   label,
                 )}" aria-label="Grafik ${escapeHtml(row.name)} ${escapeHtml(label)}">
-                  <span class="schedule-day-label">${escapeHtml(day.label)} ${escapeHtml(
-                    day.date || formatScheduleDate(day.isoDate) || "",
-                  )}</span>
-                  <strong>${escapeHtml(value ? displayValue : "-")}</strong>
-                  <small>${value ? "Edytuj" : "Kliknij"}</small>
+                  <strong>${escapeHtml(displayValue)}</strong>
+                  <small>${escapeHtml(value ? fullDisplayValue : "Dodaj")}</small>
                 </button>`
               : `<div class="schedule-day-box readonly ${cellClass}">
-                  <span class="schedule-day-label">${escapeHtml(day.label)} ${escapeHtml(
-                    day.date || formatScheduleDate(day.isoDate) || "",
-                  )}</span>
-                  <strong class="${value ? "" : "muted"}">${escapeHtml(value ? displayValue : "-")}</strong>
+                  <strong class="${value ? "" : "muted"}">${escapeHtml(displayValue)}</strong>
+                  ${value ? `<small>${escapeHtml(fullDisplayValue)}</small>` : ""}
                 </div>`
           }`;
         })
@@ -4569,21 +5153,30 @@ function renderSchedule() {
         const cell = row.cells?.find((item) => item.day === day.key) || { value: "" };
         return sum + scheduleValueSeconds(cell.value || "");
       }, 0);
+      const initials = getInitialsByLogin(row.login, row.name);
       return `
         <article class="schedule-week-row">
           <div class="schedule-week-person">
+            <span class="avatar team-avatar-${escapeHtml(slugifyLogin(row.login || row.name))}">${escapeHtml(initials)}</span>
             <strong>${escapeHtml(row.name)}</strong>
-            <span>Suma: ${escapeHtml(formatWorkDuration(sumSeconds))}</span>
           </div>
           <div class="schedule-week-days">
             ${rowCells}
+          </div>
+          <div class="schedule-week-total">
+            <strong>${escapeHtml(formatCompactWorkDuration(sumSeconds))}</strong>
           </div>
         </article>
       `;
     })
     .join("");
   $("#scheduleTable").innerHTML = `
-    <div class="schedule-week-board">
+    <div class="schedule-week-board schedule-reference-board">
+      <div class="schedule-reference-row schedule-reference-head">
+        <div>Osoba</div>
+        ${headerCells}
+        <div>Suma</div>
+      </div>
       ${bodyRows}
     </div>
   `;
@@ -5235,6 +5828,29 @@ function renderCalendar() {
   if ($("#calendarDayDialog")?.open && activeCalendarDay) renderCalendarDayDetails(activeCalendarDay);
 }
 
+function dashboardUpcomingDateParts(event) {
+  const visible = visibleCalendarDate();
+  const day = normalizeCalendarDayValue(event.day) || visible.getDate();
+  const date = new Date(visible.getFullYear(), visible.getMonth(), day);
+  const month = new Intl.DateTimeFormat("pl-PL", { month: "short" })
+    .format(date)
+    .replace(".", "")
+    .toUpperCase();
+  return {
+    day: String(day).padStart(2, "0"),
+    month,
+  };
+}
+
+function dashboardUpcomingMeta(event) {
+  const details = [];
+  if (event.time) details.push(event.time);
+  if (event.meta) details.push(event.meta);
+  else if (event.body) details.push(event.body);
+  else if (event.sourceLabel) details.push(event.sourceLabel.toLowerCase());
+  return details.join(" · ");
+}
+
 function renderDashboardUpcoming() {
   const list = $("#dashboardUpcomingList");
   if (!list) return;
@@ -5245,10 +5861,20 @@ function renderDashboardUpcoming() {
   list.innerHTML = upcoming.length
     ? upcoming
         .map(
-          (event) =>
-            `<li><time>${escapeHtml(event.dateLabel || "-")}</time><span>${escapeHtml(event.sourceLabel)}: ${escapeHtml(
-              event.title,
-            )}</span></li>`,
+          (event) => {
+            const date = dashboardUpcomingDateParts(event);
+            const meta = dashboardUpcomingMeta(event);
+            return `<li class="source-upcoming-item">
+              <time class="source-upcoming-date" datetime="${escapeHtml(event.dateLabel || "")}">
+                <strong>${escapeHtml(date.day)}</strong>
+                <span>${escapeHtml(date.month)}</span>
+              </time>
+              <span class="source-upcoming-copy">
+                <strong>${escapeHtml(event.title)}</strong>
+                <small>${escapeHtml(meta || event.sourceLabel || "")}</small>
+              </span>
+            </li>`;
+          },
         )
         .join("")
     : `<li class="empty-state">Brak nadchodzących wydarzeń.</li>`;
@@ -5268,6 +5894,17 @@ function leaveStatusClass(status = "") {
   if (status === "Zaakceptowane") return "s-ok";
   if (status === "Odrzucone") return "s-new";
   return "s-todo";
+}
+
+function leaveStatusLabel(status = "") {
+  if (status === "Zaakceptowane") return "Zatwierdzony";
+  if (status === "Odrzucone") return "Odrzucony";
+  return status || "Oczekuje";
+}
+
+function leaveAvatarClass(login = "", name = "") {
+  const slug = slugifyLogin(login || name);
+  return slug ? `leave-avatar-${slug}` : "leave-avatar-default";
 }
 
 function parseLeaveDetail(detail = "") {
@@ -5339,24 +5976,29 @@ function renderLeaves() {
         .map((request) => {
           const detail = parseLeaveDetail(request.detail);
           const ownerName = request.owner || getDisplayNameByLogin(request.ownerLogin) || "Pracownik";
+          const avatarClass = leaveAvatarClass(request.ownerLogin, ownerName);
           const actionButtons = request.status === "Oczekuje"
-            ? `<button class="mini admin-widget" data-request-action="approve" data-request-id="${escapeHtml(
-                request.id,
-              )}" type="button">Akceptuj</button>
-               <button class="mini admin-widget" data-request-action="reject" data-request-id="${escapeHtml(
-                 request.id,
-               )}" type="button">Odrzuć</button>`
+            ? `<div class="leave-row-actions">
+                <button class="mini admin-widget" data-request-action="approve" data-request-id="${escapeHtml(
+                  request.id,
+                )}" type="button">Akceptuj</button>
+                <button class="mini admin-widget leave-reject-button" data-request-action="reject" data-request-id="${escapeHtml(
+                  request.id,
+                )}" type="button">Odrzuć</button>
+              </div>`
             : "";
           return `
             <tr>
-              <td><div class="who"><div class="av">${escapeHtml(makeInitials(ownerName))}</div>${escapeHtml(ownerName)}</div></td>
+              <td><div class="who"><div class="av ${escapeHtml(avatarClass)}">${escapeHtml(
+                getInitialsByLogin(request.ownerLogin, ownerName),
+              )}</div>${escapeHtml(ownerName)}</div></td>
               <td>${escapeHtml(detail.type)}</td>
               <td>
                 <strong>${escapeHtml(detail.term)}</strong>
                 ${detail.comment ? `<span class="muted">${escapeHtml(detail.comment)}</span>` : ""}
               </td>
               <td>${escapeHtml(detail.days || "-")}</td>
-              <td><span class="state ${leaveStatusClass(request.status)}">${escapeHtml(request.status)}</span></td>
+              <td><span class="state ${leaveStatusClass(request.status)}">${escapeHtml(leaveStatusLabel(request.status))}</span></td>
               <td>${actionButtons}</td>
             </tr>
           `;
@@ -5427,6 +6069,24 @@ function reportStateAccent(report) {
   return "is-new";
 }
 
+function reportPriorityAccent(report) {
+  if (report.priority === "urgent") return "is-priority-urgent";
+  if (report.priority === "important") return "is-priority-important";
+  return "is-priority-normal";
+}
+
+function reportDisplayTitle(report) {
+  const title = String(report.title || "").trim();
+  const category = String(report.category || "").trim();
+  if (title && title !== category) return title;
+  const firstLine = String(report.detail || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return title || category || "Zgłoszenie";
+  return firstLine.length > 74 ? `${firstLine.slice(0, 71).trim()}...` : firstLine;
+}
+
 function renderReports() {
   normalizeReports();
   const visibleReports = reports
@@ -5445,6 +6105,9 @@ function renderReports() {
     .map(({ report }) => {
       const fileMeta = [report.fileName, report.fileSize ? formatFileSize(report.fileSize) : ""].filter(Boolean).join(" · ");
       const isClosed = reportIsClosed(report);
+      const reportComments = normalizeEntityComments(report.comments);
+      const commentsCount = reportComments.length;
+      const commentsOpen = String(openReportCommentId) === String(report.id);
       const actions = isClosed
         ? `
             <button class="secondary-button" data-report-reopen="${report.id}" type="button">Cofnij</button>
@@ -5456,13 +6119,13 @@ function renderReports() {
             <button class="secondary-button" data-report-close="${report.id}" type="button">Oznacz załatwione</button>
           `;
       return `
-        <article class="report-card report-item ${isClosed ? "is-complete" : ""} ${reportIsAccepted(report) ? "is-accepted" : ""}">
+        <article class="report-card report-item ${isClosed ? "is-complete" : ""} ${reportIsAccepted(report) ? "is-accepted" : ""} ${reportPriorityAccent(report)}">
           <div class="report-item-top">
             <span class="report-tag ${reportCategoryAccent(report)}">${escapeHtml(report.category)}</span>
             <span class="report-state ${reportStateAccent(report)}">${escapeHtml(report.status)}</span>
             <span class="report-time">${escapeHtml(activityTimeLabel(report.updatedAt || report.createdAt, report.createdAt || "teraz"))}</span>
           </div>
-          <h3>${escapeHtml(report.title)}</h3>
+          <h3>${escapeHtml(reportDisplayTitle(report))}</h3>
           <p class="report-detail">${escapeHtml(report.detail)}</p>
           <div class="report-sub">Zgłosił: ${escapeHtml(report.owner)}</div>
           ${
@@ -5478,6 +6141,23 @@ function renderReports() {
                 </div>`
               : ""
           }
+          <div class="entity-social-row report-social-row">
+            ${renderEntityReactionButtons(report.reactions, "report", report.id)}
+            <button class="entity-comment-button report-comment-count ${commentsOpen ? "is-open" : ""}" data-report-comment="${escapeHtml(
+              report.id,
+            )}" type="button" aria-expanded="${commentsOpen ? "true" : "false"}" title="Dodaj komentarz">&#128172; ${commentsCount}</button>
+          </div>
+          <section class="comment-section report-comment-section ${commentsOpen ? "is-open" : ""}">
+            <div class="comment-section-header">
+              <h4>Komentarze</h4>
+              <span class="pill">${commentsCount}</span>
+            </div>
+            <div class="comment-list">${renderEntityComments(reportComments, "Brak komentarzy do zgłoszenia.")}</div>
+            <form class="comment-form" data-report-comment-form="${escapeHtml(report.id)}">
+              <input name="body" type="text" placeholder="Dodaj komentarz do zgłoszenia" required />
+              <button class="secondary-button" type="submit">Dodaj</button>
+            </form>
+          </section>
           <div class="card-actions report-actions">
             ${actions}
           </div>
@@ -5512,7 +6192,7 @@ function monthShortLabel(date) {
   return new Intl.DateTimeFormat("pl-PL", { month: "short" }).format(date).replace(".", "");
 }
 
-function buildStatsActivityBuckets() {
+function buildStatsActivityBuckets(peopleStats = statsPeopleSource()) {
   const today = new Date();
   const buckets = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(today);
@@ -5521,38 +6201,340 @@ function buildStatsActivityBuckets() {
     return {
       key: formatDateInput(date),
       label: new Intl.DateTimeFormat("pl-PL", { weekday: "short" }).format(date),
-      count: 0,
+      seconds: 0,
+      hours: 0,
     };
   });
   const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
-  buildActivityFeedItems().forEach((item) => {
-    const date = new Date(item.sortValue);
-    if (Number.isNaN(date.getTime())) return;
-    const bucket = byKey.get(formatDateInput(date));
-    if (bucket) bucket.count += 1;
+
+  const schedule = timeSummary?.schedule || {};
+  const dayDateByKey = new Map((schedule.days || []).map((day) => [day.key, day.isoDate || ""]));
+  (schedule.rows || []).forEach((row) => {
+    (row.cells || []).forEach((cell) => {
+      const isoDate = dayDateByKey.get(cell.day);
+      const bucket = byKey.get(isoDate);
+      if (!bucket) return;
+      bucket.seconds += scheduleValueSeconds(cell.value || "");
+    });
+  });
+
+  const todayKey = formatDateInput(today);
+  const todayBucket = byKey.get(todayKey);
+  if (todayBucket) {
+    const todaySeconds = peopleStats.reduce((sum, person) => sum + statsWorkSeconds(person, "today"), 0);
+    todayBucket.seconds = Math.max(todayBucket.seconds, todaySeconds);
+  }
+
+  buckets.forEach((bucket) => {
+    bucket.hours = Number((bucket.seconds / 3600).toFixed(1));
   });
   return buckets;
 }
 
-function buildStatsTrendBuckets() {
+function statsMonthKeyFromValue(value, fallback) {
+  const timestamp = typeof value === "number" ? value : activitySortValue(value, fallback);
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function buildStatsTrendBuckets(taskItems = [], peopleStats = statsPeopleSource()) {
   const today = new Date();
   const buckets = Array.from({ length: 6 }, (_, index) => {
     const date = new Date(today.getFullYear(), today.getMonth() - (5 - index), 1);
     return {
       key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
       label: monthShortLabel(date),
-      count: 0,
+      tasks: 0,
+      attendance: 0,
+      activeUsers: new Set(),
     };
   });
   const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
-  buildActivityFeedItems().forEach((item) => {
-    const date = new Date(item.sortValue);
-    if (Number.isNaN(date.getTime())) return;
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  const now = Date.now();
+  taskItems.forEach((task, index) => {
+    const key = statsMonthKeyFromValue(task.updatedAt || task.createdAt, now - index * 3600000);
     const bucket = byKey.get(key);
-    if (bucket) bucket.count += 1;
+    if (!bucket) return;
+    bucket.tasks += 1;
+    const ownerLogin = normalizeLogin(task.ownerLogin || "");
+    if (ownerLogin) bucket.activeUsers.add(ownerLogin);
+  });
+  buildActivityFeedItems().forEach((item) => {
+    const key = statsMonthKeyFromValue(item.sortValue, now);
+    const bucket = byKey.get(key);
+    if (!bucket) return;
+    const actorLogin = normalizeLogin(item.actorLogin || "");
+    if (actorLogin) bucket.activeUsers.add(actorLogin);
+  });
+
+  const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const activeCount = Math.max(1, peopleStats.length);
+  const currentActualSeconds = peopleStats.reduce((sum, person) => sum + statsWorkSeconds(person, "month"), 0);
+  const currentScheduledSeconds = peopleStats.reduce(
+    (sum, person) => sum + Number(person.scheduledMonthSeconds || 0),
+    0,
+  );
+  const currentAttendance = currentScheduledSeconds
+    ? Math.min(100, statPercent(currentActualSeconds, currentScheduledSeconds))
+    : statPercent(peopleStats.filter((person) => person.state === "work" || person.state === "break").length, peopleStats.length);
+  buckets.forEach((bucket) => {
+    const activityAttendance = statPercent(bucket.activeUsers.size, activeCount);
+    bucket.tasks = Math.round(bucket.tasks);
+    bucket.attendance = bucket.key === currentMonthKey ? Math.max(activityAttendance, currentAttendance) : activityAttendance;
+    delete bucket.activeUsers;
   });
   return buckets;
+}
+
+function statsNiceMax(value, step = 5, minimum = step) {
+  return Math.max(minimum, Math.ceil((Number(value) || 0) / step) * step);
+}
+
+function statsPoint(value, max, index, total, width, height, padding) {
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const x = padding.left + (total <= 1 ? plotWidth / 2 : (plotWidth / (total - 1)) * index);
+  const y = padding.top + plotHeight - (Math.max(0, Number(value) || 0) / Math.max(1, max)) * plotHeight;
+  return { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) };
+}
+
+function statsLinePath(points) {
+  if (!points.length) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  const command = [`M ${points[0].x} ${points[0].y}`];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[index - 1] || points[index];
+    const p1 = points[index];
+    const p2 = points[index + 1];
+    const p3 = points[index + 2] || p2;
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    command.push(
+      `C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x} ${p2.y}`,
+    );
+  }
+  return command.join(" ");
+}
+
+function statsAreaPath(points, height, padding) {
+  if (!points.length) return "";
+  const bottom = height - padding.bottom;
+  const body = points.map((point) => `L ${point.x} ${point.y}`).join(" ");
+  return `M ${points[0].x} ${bottom} ${body} L ${points[points.length - 1].x} ${bottom} Z`;
+}
+
+function renderStatsActivityLineChart(buckets) {
+  const width = 1040;
+  const height = 270;
+  const padding = { top: 24, right: 22, bottom: 34, left: 38 };
+  const maxHours = statsNiceMax(Math.max(...buckets.map((bucket) => bucket.hours), 0), 5, 5);
+  const points = buckets.map((bucket, index) => statsPoint(bucket.hours, maxHours, index, buckets.length, width, height, padding));
+  const gridLines = Array.from({ length: 6 }, (_, index) => {
+    const value = maxHours - (maxHours / 5) * index;
+    const y = padding.top + ((height - padding.top - padding.bottom) / 5) * index;
+    return `
+      <line class="stats-chart-grid" x1="${padding.left}" x2="${width - padding.right}" y1="${y}" y2="${y}" />
+      <text class="stats-axis-label" x="${padding.left - 9}" y="${y + 4}" text-anchor="end">${Number(value.toFixed(0))}</text>
+    `;
+  }).join("");
+  return `
+    <svg class="stats-line-chart stats-activity-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Godziny pracy firmy z ostatnich 7 dni">
+      <g>${gridLines}</g>
+      <path class="stats-line-area" d="${statsAreaPath(points, height, padding)}"></path>
+      <path class="stats-line-path stats-line-primary" pathLength="1" d="${statsLinePath(points)}"></path>
+      ${points
+        .map(
+          (point, index) => `
+            <circle class="stats-line-dot stats-line-dot-primary" cx="${point.x}" cy="${point.y}" r="4.5">
+              <title>${escapeHtml(buckets[index].label)}: ${buckets[index].hours}h</title>
+            </circle>
+          `,
+        )
+        .join("")}
+      ${buckets
+        .map((bucket, index) => {
+          const point = points[index];
+          return `<text class="stats-x-label" x="${point.x}" y="${height - 7}" text-anchor="middle">${escapeHtml(bucket.label)}</text>`;
+        })
+        .join("")}
+    </svg>
+  `;
+}
+
+function renderStatsTrendLineChart(buckets) {
+  const width = 1040;
+  const height = 270;
+  const padding = { top: 45, right: 40, bottom: 34, left: 38 };
+  const maxTasks = statsNiceMax(Math.max(...buckets.map((bucket) => bucket.tasks), 0), 5, 5);
+  const taskPoints = buckets.map((bucket, index) => statsPoint(bucket.tasks, maxTasks, index, buckets.length, width, height, padding));
+  const attendancePoints = buckets.map((bucket, index) =>
+    statsPoint(bucket.attendance, 100, index, buckets.length, width, height, padding),
+  );
+  const gridLines = Array.from({ length: 5 }, (_, index) => {
+    const leftValue = maxTasks - (maxTasks / 4) * index;
+    const rightValue = 100 - 5 * index;
+    const y = padding.top + ((height - padding.top - padding.bottom) / 4) * index;
+    return `
+      <line class="stats-chart-grid" x1="${padding.left}" x2="${width - padding.right}" y1="${y}" y2="${y}" />
+      <text class="stats-axis-label" x="${padding.left - 9}" y="${y + 4}" text-anchor="end">${Number(leftValue.toFixed(0))}</text>
+      <text class="stats-axis-label" x="${width - padding.right + 9}" y="${y + 4}" text-anchor="start">${Number(rightValue.toFixed(0))}</text>
+    `;
+  }).join("");
+  return `
+    <svg class="stats-line-chart stats-trend-line-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Trend zadań i frekwencji z ostatnich 6 miesięcy">
+      <g class="stats-chart-legend">
+        <rect class="stats-legend-square primary" x="${width / 2 - 82}" y="15" width="9" height="9" />
+        <text class="stats-legend-label" x="${width / 2 - 67}" y="23">Zadania</text>
+        <rect class="stats-legend-square secondary" x="${width / 2 - 4}" y="15" width="9" height="9" />
+        <text class="stats-legend-label" x="${width / 2 + 11}" y="23">Frekwencja %</text>
+      </g>
+      <g>${gridLines}</g>
+      <path class="stats-line-area" d="${statsAreaPath(taskPoints, height, padding)}"></path>
+      <path class="stats-line-path stats-line-primary" pathLength="1" d="${statsLinePath(taskPoints)}"></path>
+      <path class="stats-line-path stats-line-secondary" pathLength="1" d="${statsLinePath(attendancePoints)}"></path>
+      ${taskPoints
+        .map(
+          (point, index) => `
+            <circle class="stats-line-dot stats-line-dot-primary" cx="${point.x}" cy="${point.y}" r="4">
+              <title>${escapeHtml(buckets[index].label)}: ${buckets[index].tasks} zadań</title>
+            </circle>
+          `,
+        )
+        .join("")}
+      ${attendancePoints
+        .map(
+          (point, index) => `
+            <circle class="stats-line-dot stats-line-dot-secondary" cx="${point.x}" cy="${point.y}" r="4">
+              <title>${escapeHtml(buckets[index].label)}: ${buckets[index].attendance}% frekwencji</title>
+            </circle>
+          `,
+        )
+        .join("")}
+      ${buckets
+        .map((bucket, index) => {
+          const point = taskPoints[index];
+          return `<text class="stats-x-label" x="${point.x}" y="${height - 7}" text-anchor="middle">${escapeHtml(bucket.label)}</text>`;
+        })
+        .join("")}
+    </svg>
+  `;
+}
+
+function triggerStatsChartsAnimation() {
+  const statsView = $("#stats");
+  if (!statsView) return;
+  statsView.classList.remove("stats-animate");
+  void statsView.offsetWidth;
+  statsView.classList.add("stats-animate");
+  if (statsAnimationTimer) window.clearTimeout(statsAnimationTimer);
+  statsAnimationTimer = window.setTimeout(() => {
+    statsView.classList.remove("stats-animate");
+  }, 1500);
+}
+
+function statsDonutPoint(cx, cy, radius, angle) {
+  const radians = ((angle - 90) * Math.PI) / 180;
+  return {
+    x: cx + radius * Math.cos(radians),
+    y: cy + radius * Math.sin(radians),
+  };
+}
+
+function statsDonutPath(cx, cy, outerRadius, innerRadius, startAngle, endAngle) {
+  const outerStart = statsDonutPoint(cx, cy, outerRadius, startAngle);
+  const outerEnd = statsDonutPoint(cx, cy, outerRadius, endAngle);
+  const innerStart = statsDonutPoint(cx, cy, innerRadius, endAngle);
+  const innerEnd = statsDonutPoint(cx, cy, innerRadius, startAngle);
+  const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0;
+
+  return [
+    `M ${outerStart.x.toFixed(3)} ${outerStart.y.toFixed(3)}`,
+    `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${outerEnd.x.toFixed(3)} ${outerEnd.y.toFixed(3)}`,
+    `L ${innerStart.x.toFixed(3)} ${innerStart.y.toFixed(3)}`,
+    `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerEnd.x.toFixed(3)} ${innerEnd.y.toFixed(3)}`,
+    "Z",
+  ].join(" ");
+}
+
+function renderTaskStatusDonut(segments, total) {
+  const center = 120;
+  const outerRadius = 94;
+  const innerRadius = 46;
+  let offset = 0;
+
+  const slices = total
+    ? segments
+        .filter((segment) => segment.value > 0)
+        .map((segment) => {
+          const start = (offset / total) * 360;
+          offset += segment.value;
+          const rawEnd = (offset / total) * 360;
+          const end = rawEnd - start >= 360 ? start + 359.99 : rawEnd;
+          const mid = start + (end - start) / 2;
+          const radians = ((mid - 90) * Math.PI) / 180;
+          const hoverX = Math.cos(radians) * 8;
+          const hoverY = Math.sin(radians) * 8;
+          const tipX = Math.cos(radians) >= 0 ? 150 : -74;
+          const tipY = Math.max(14, Math.min(148, center + Math.sin(radians) * 74 - 36));
+          const percent = statPercent(segment.value, total);
+          const path = statsDonutPath(center, center, outerRadius, innerRadius, start, end);
+          const tooltip = `${segment.label}: ${segment.value} zadań (${percent}%)`;
+
+          return `
+            <g class="stats-donut-slice ${segment.className}" tabindex="0" focusable="true" role="listitem" aria-label="${escapeHtml(tooltip)}">
+              <path class="stats-donut-hit" d="${path}"></path>
+              <path class="stats-donut-segment" d="${path}" style="--slice-x: ${hoverX.toFixed(2)}px; --slice-y: ${hoverY.toFixed(2)}px; fill: ${segment.color};">
+                <title>${escapeHtml(tooltip)}</title>
+              </path>
+              <foreignObject class="stats-donut-tooltip" x="${tipX.toFixed(1)}" y="${tipY.toFixed(1)}" width="164" height="78">
+                <div xmlns="http://www.w3.org/1999/xhtml" class="stats-donut-tooltip-box">
+                  <strong>${escapeHtml(segment.label)}</strong>
+                  <span>${segment.value} zadań · ${percent}%</span>
+                  <small>${escapeHtml(segment.description)}</small>
+                </div>
+              </foreignObject>
+            </g>
+          `;
+        })
+        .join("")
+    : `<circle class="stats-donut-empty-ring" cx="${center}" cy="${center}" r="${(outerRadius + innerRadius) / 2}"></circle>`;
+
+  return `
+    <div class="stats-donut-wrap">
+      <svg class="stats-donut-svg" viewBox="0 0 240 240" role="img" aria-label="Zadania według statusu">
+        <g role="list">${slices}</g>
+      </svg>
+      <div class="stats-donut-center" aria-hidden="true">
+        <strong>${total}</strong>
+        <span>zadań</span>
+      </div>
+    </div>
+  `;
+}
+
+function bindTaskStatusDonutInteractions(chart) {
+  const slices = [...chart.querySelectorAll(".stats-donut-slice")];
+  const clearActive = () => slices.forEach((slice) => slice.classList.remove("is-active"));
+
+  slices.forEach((slice) => {
+    const activate = () => {
+      clearActive();
+      slice.classList.add("is-active");
+    };
+    const deactivate = () => slice.classList.remove("is-active");
+
+    slice.addEventListener("pointerenter", activate);
+    slice.addEventListener("pointerleave", deactivate);
+    slice.addEventListener("focusin", activate);
+    slice.addEventListener("focusout", deactivate);
+    slice.addEventListener("click", () => {
+      activate();
+      if (typeof slice.focus === "function") slice.focus();
+    });
+  });
 }
 
 function renderStats() {
@@ -5625,24 +6607,37 @@ function renderStats() {
     : `<div class="empty-state">Brak danych czasu pracy.</div>`;
 
   const donutSegments = [
-    { label: "Do zrobienia", value: taskCounts.todo, color: "var(--primary)", className: "amber" },
-    { label: "W trakcie", value: taskCounts.doing, color: "color-mix(in srgb, var(--primary), var(--surface) 18%)", className: "teal" },
-    { label: "Do sprawdzenia", value: taskCounts.review, color: "color-mix(in srgb, var(--primary), #ffffff 26%)", className: "blue" },
-    { label: "Zrobione", value: taskCounts.done, color: "color-mix(in srgb, var(--primary), var(--text) 14%)", className: "green" },
+    {
+      label: "Do zrobienia",
+      value: taskCounts.todo,
+      color: "#f59e0b",
+      className: "amber",
+      description: "Czeka na rozpoczęcie",
+    },
+    {
+      label: "W trakcie",
+      value: taskCounts.doing,
+      color: "#3b82f6",
+      className: "teal",
+      description: "Aktualnie realizowane",
+    },
+    {
+      label: "Do sprawdzenia",
+      value: taskCounts.review,
+      color: "#8b5cf6",
+      className: "blue",
+      description: "Wymaga sprawdzenia",
+    },
+    {
+      label: "Zrobione",
+      value: taskCounts.done,
+      color: "#10b981",
+      className: "green",
+      description: "Zakończone zadania",
+    },
   ];
-  let segmentOffset = 0;
-  const conicParts = donutSegments.map((segment) => {
-    const start = totalTasks ? (segmentOffset / totalTasks) * 360 : 0;
-    segmentOffset += segment.value;
-    const end = totalTasks ? (segmentOffset / totalTasks) * 360 : 0;
-    return `${segment.color} ${start}deg ${end}deg`;
-  });
-  const donutBackground = totalTasks ? conicParts.join(", ") : "var(--surface-strong) 0deg 360deg";
   taskStatusChart.innerHTML = `
-    <div class="stats-donut" style="background: conic-gradient(${donutBackground});">
-      <strong>${totalTasks}</strong>
-      <span>zadań</span>
-    </div>
+    ${renderTaskStatusDonut(donutSegments, totalTasks)}
     <div class="stats-status-legend">
       ${donutSegments
         .map(
@@ -5657,38 +6652,19 @@ function renderStats() {
         .join("")}
     </div>
   `;
+  bindTaskStatusDonutInteractions(taskStatusChart);
 
-  const activityBuckets = buildStatsActivityBuckets();
-  const maxActivity = Math.max(1, ...activityBuckets.map((bucket) => bucket.count));
-  activityChart.innerHTML = activityBuckets
-    .map((bucket) => {
-      const height = Math.max(bucket.count ? 18 : 6, Math.round((bucket.count / maxActivity) * 100));
-      return `
-        <div class="stats-activity-bar">
-          <span style="height: ${height}%"></span>
-          <strong>${bucket.count}</strong>
-          <small>${escapeHtml(bucket.label)}</small>
-        </div>
-      `;
-    })
-    .join("");
+  const activityBuckets = buildStatsActivityBuckets(peopleStats);
+  const activityTotalHours = activityBuckets.reduce((sum, bucket) => sum + bucket.hours, 0);
+  $("#statsActivityBadge").textContent = `${activityTotalHours.toLocaleString("pl-PL", {
+    maximumFractionDigits: 1,
+  })}h`;
+  activityChart.innerHTML = renderStatsActivityLineChart(activityBuckets);
 
-  const trendBuckets = buildStatsTrendBuckets();
-  const maxTrend = Math.max(1, ...trendBuckets.map((bucket) => bucket.count));
-  const trendTotal = trendBuckets.reduce((sum, bucket) => sum + bucket.count, 0);
-  $("#statsTrendBadge").textContent = `${trendTotal} wpisów`;
-  trendChart.innerHTML = trendBuckets
-    .map((bucket) => {
-      const height = Math.max(bucket.count ? 20 : 7, Math.round((bucket.count / maxTrend) * 100));
-      return `
-        <div class="stats-trend-point">
-          <span style="height: ${height}%"></span>
-          <strong>${bucket.count}</strong>
-          <small>${escapeHtml(bucket.label)}</small>
-        </div>
-      `;
-    })
-    .join("");
+  const trendBuckets = buildStatsTrendBuckets(taskItems, peopleStats);
+  const trendTotal = trendBuckets.reduce((sum, bucket) => sum + bucket.tasks, 0);
+  $("#statsTrendBadge").textContent = `${trendTotal} zadań`;
+  trendChart.innerHTML = renderStatsTrendLineChart(trendBuckets);
 
   teamTable.innerHTML = peopleStats.length
     ? peopleStats
@@ -6471,6 +7447,13 @@ function getDisplayNameByLogin(login) {
   return getPersonByLogin(login)?.name || getAccountByLogin(login)?.name || login || "Użytkownik";
 }
 
+function getInitialsByLogin(login, fallbackName = "") {
+  const normalizedLogin = normalizeLogin(login);
+  const person = normalizedLogin ? getPersonByLogin(normalizedLogin) : null;
+  const account = normalizedLogin ? getAccountByLogin(normalizedLogin) : null;
+  return person?.initials || account?.initials || makeInitials(fallbackName || getDisplayNameByLogin(normalizedLogin) || "PK");
+}
+
 function getConversationMembers(conversation) {
   if (conversation.kind === "direct") {
     return conversation.memberLogins.map(getPersonByLogin).filter(Boolean);
@@ -6531,6 +7514,14 @@ function getConversationInitials(conversation) {
     return person?.initials || makeInitials(conversation.title);
   }
   return makeInitials(String(conversation.title || "").replace(/^#\s*/, ""));
+}
+
+function getConversationPreview(conversation) {
+  const lastMessage = getConversationLastMessage(conversation);
+  if (!lastMessage) return conversation.subtitle || "Brak wiadomości";
+  const author = isOwnMessage(lastMessage) ? "Ty" : getMessageAuthor(lastMessage);
+  const body = lastMessage.body || (lastMessage.attachments?.length ? "Załącznik" : "Wiadomość");
+  return `${author}: ${body}`;
 }
 
 function getRecentChatConversations(limit = 4) {
@@ -6715,6 +7706,21 @@ function formatKnowledgeDate(value) {
   }).format(new Date(parsed));
 }
 
+function knowledgeTypeLabel(type = "") {
+  return String(type || "").toUpperCase() === "IMG" ? "Obraz" : type || "Dokument";
+}
+
+function renderKnowledgeDocumentIcon() {
+  return `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
+      <path d="M14 3v5h5"/>
+      <path d="M9 13h6"/>
+      <path d="M9 17h4"/>
+    </svg>
+  `;
+}
+
 async function openKnowledgeDetails(articleId) {
   let article = findKnowledgeArticle(articleId);
   if (!article && backendAvailable && isLoggedIn()) {
@@ -6726,7 +7732,7 @@ async function openKnowledgeDetails(articleId) {
     return;
   }
   activeKnowledgeArticleId = article.id;
-  $("#kbDialogType").textContent = article.type || "Dokument";
+  $("#kbDialogType").textContent = knowledgeTypeLabel(article.type);
   $("#kbDialogTitle").textContent = article.title || "Dokument";
   $("#kbDialogDescription").textContent = article.detail || "Brak opisu dokumentu.";
   $("#kbDialogAuthor").textContent = article.createdBy ? getDisplayNameByLogin(article.createdBy) : "Brak danych";
@@ -6765,6 +7771,24 @@ function renderChatGroupMembers() {
       `,
     )
     .join("");
+}
+
+function toggleChatNewMenu(force) {
+  const menu = $("#chatNewMenu");
+  const button = $("[data-chat-new-toggle]");
+  if (!menu || !button) return;
+  const shouldOpen = typeof force === "boolean" ? force : menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !shouldOpen);
+  button.classList.toggle("active", shouldOpen);
+  button.setAttribute("aria-expanded", String(shouldOpen));
+  if (shouldOpen) {
+    renderChatGroupMembers();
+    window.setTimeout(() => $("#chatGroupName")?.focus(), 0);
+  }
+}
+
+function closeChatNewMenu() {
+  toggleChatNewMenu(false);
 }
 
 function getMessageAuthor(message) {
@@ -6810,6 +7834,7 @@ function renderChat() {
         const lastMessage = getConversationLastMessage(conversation);
         const metaLabel = lastMessage?.time || (conversation.kind === "direct" ? "kontakt" : "grupa");
         const initials = getConversationInitials(conversation);
+        const preview = getConversationPreview(conversation);
         return `
         <button class="conversation-button ${conversation.id === currentConversation ? "active" : ""} ${
           unreadCount ? "unread" : ""
@@ -6820,7 +7845,7 @@ function renderChat() {
               unreadCount ? `aria-label="${unreadCount} nieodczytane wiadomości"` : ""
             }>${unreadCount ? conversationUnreadLabel(unreadCount) : ""}</span>
           </span>
-          <span class="muted">${escapeHtml(conversation.subtitle)}</span>
+          <span class="muted">${escapeHtml(preview)}</span>
         </button>
       `;
       },
@@ -6829,6 +7854,7 @@ function renderChat() {
 
   const conversation = availableConversations.find((item) => item.id === currentConversation) || availableConversations[0];
   $("#chatTitle").textContent = conversation.title;
+  $("#chatSubtitle").textContent = conversation.subtitle || "Rozmowa";
   $("#chat .chat-panel .panel-header")?.setAttribute("data-chat-initials", getConversationInitials(conversation));
   $("#messageList").innerHTML = conversation.messages.length
     ? conversation.messages
@@ -6868,6 +7894,7 @@ function renderKnowledge() {
       (article) => {
         const sizeLabel = article.fileSize ? formatFileSize(article.fileSize) : "";
         const fileMeta = [article.fileName, sizeLabel].filter(Boolean).join(" · ");
+        const typeLabel = knowledgeTypeLabel(article.type);
         const createdMeta = [
           article.createdBy ? `Dodał: ${getDisplayNameByLogin(article.createdBy)}` : "",
           activityTimeLabel(article.createdAt, ""),
@@ -6876,11 +7903,11 @@ function renderKnowledge() {
           .join(" · ");
         return `
         <article class="kb-card">
-          <span class="kb-icon">${escapeHtml(article.type)}</span>
+          <span class="kb-icon" aria-label="${escapeHtml(typeLabel)}" title="${escapeHtml(typeLabel)}">${renderKnowledgeDocumentIcon()}</span>
           <div>
             <div class="card-line">
               <strong>${escapeHtml(article.title)}</strong>
-              <span class="pill">${escapeHtml(article.type)}</span>
+              <span class="pill">${escapeHtml(typeLabel)}</span>
             </div>
             <p class="note">${escapeHtml(article.detail)}</p>
             ${createdMeta ? `<span class="muted">${escapeHtml(createdMeta)}</span>` : ""}
@@ -6992,6 +8019,7 @@ function activateView(viewId) {
   }
   if (actualViewId === "stats") {
     renderStats();
+    triggerStatsChartsAnimation();
     if (backendAvailable && isLoggedIn()) {
       Promise.all([
         syncTasksFromBackend({ silent: true }),
@@ -7002,7 +8030,10 @@ function activateView(viewId) {
         syncInventoryFromBackend({ silent: true }),
         syncTimeSummaryFromBackend({ silent: true }),
       ]).then((changes) => {
-        if (changes.some(Boolean)) renderStats();
+        if (changes.some(Boolean)) {
+          renderStats();
+          triggerStatsChartsAnimation();
+        }
       });
     }
   }
@@ -7138,6 +8169,13 @@ function submitGlobalSearch(event) {
   openSearch($("#globalSearchInput").value.trim());
 }
 
+function updateAnnouncementRecipientsVisibility() {
+  const audience = $("#postAudience");
+  const fieldset = $(".announcement-recipient-fieldset");
+  if (!audience || !fieldset) return;
+  fieldset.classList.toggle("hidden", audience.value !== "selected");
+}
+
 async function addQuickTaskFromContext(title = "Nowe zadanie") {
   const createdTask = await addTaskToBoard({
     title,
@@ -7175,6 +8213,7 @@ async function createPost(event) {
       pushNotification("Nowe ogłoszenie", title, { view: "announcements", postId: result.post?.id });
       showToast("Opublikowano ogłoszenie", "Jest zapisane w bazie i widoczne dla pozostałych użytkowników.");
       event.target.reset();
+      updateAnnouncementRecipientsVisibility();
       renderPeople();
       return;
     } catch (error) {
@@ -7212,6 +8251,7 @@ async function createPost(event) {
   pushNotification("Nowe ogłoszenie", post.title, { view: "announcements", postId: post.id });
   showToast("Opublikowano ogłoszenie", "Pojawiło się w strumieniu i na liście ogłoszeń.");
   event.target.reset();
+  updateAnnouncementRecipientsVisibility();
 }
 
 async function createPostComment(event) {
@@ -7256,6 +8296,32 @@ async function createPostComment(event) {
   showToast("Komentarz dodany", "Widać go pod ogłoszeniem.");
 }
 
+async function toggleAnnouncementReaction(postId, reactionId) {
+  const post = getPostById(postId);
+  const reactions = post?.reactions?.[reactionId];
+  if (!post || !reactions) return;
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/announcements/${encodeURIComponent(post.id)}/reactions`, {
+        method: "POST",
+        body: JSON.stringify({ reactionId }),
+      });
+      applyAnnouncementMutationResult(result, post.id);
+      showToast("Reakcja zapisana", post.title);
+    } catch (error) {
+      showToast("Nie zapisano reakcji", error.message || "Backend odrzucił zmianę.");
+    }
+    return;
+  }
+  if (reactions.includes(getActiveName())) {
+    post.reactions[reactionId] = reactions.filter((name) => name !== getActiveName());
+  } else {
+    reactions.push(getActiveName());
+  }
+  renderAnnouncementState();
+  showToast("Reakcja zapisana", post.title);
+}
+
 async function markPostRead(postId) {
   let post = getPostById(postId);
   if (!post) return null;
@@ -7288,6 +8354,11 @@ async function openPost(postId) {
   if (post) renderPostDialog(post);
   openDialog("#postDialog");
   renderPosts(currentFeedFilter);
+}
+
+async function openPostComments(postId) {
+  await openPost(postId);
+  window.setTimeout(() => $("#postCommentInput")?.focus(), 50);
 }
 
 async function updateRequestStatus(requestId, status) {
@@ -7362,15 +8433,18 @@ async function createLeaveRequest(event) {
 async function createReport(event) {
   event.preventDefault();
   const category = $("#reportCategory").value;
+  const priority = $("#reportPriority")?.value || "normal";
   const detail = $("#reportText").value.trim();
   const file = $("#reportFileInput").files?.[0];
   if (!detail) return;
+  const title = reportDisplayTitle({ title: "", category, detail });
   if (backendAvailable) {
     try {
       const formData = new FormData(event.target);
       formData.set("category", category);
-      formData.set("title", category);
+      formData.set("title", title);
       formData.set("detail", detail);
+      formData.set("priority", priority);
       const result = await apiFormRequest("/reports", formData);
       applyReportSnapshot(result);
       renderReportState();
@@ -7386,20 +8460,83 @@ async function createReport(event) {
   reports.unshift({
     id: makeReportId(),
     category,
-    title: category,
+    title,
     detail,
     status: "Nowe",
+    priority,
     owner: getActiveName(),
     ownerLogin: getActiveLogin(),
     fileName: file?.name || "",
     fileMime: file?.type || "",
     fileSize: file?.size || 0,
     fileUrl: file ? URL.createObjectURL(file) : "",
+    reactions: normalizeEntityReactions(),
+    comments: [],
   });
-  renderReports();
-  applyRole();
+  saveReportState();
+  renderReportState();
   pushNotification("Nowe zgłoszenie", `${category}: ${detail}`, { view: "reports" });
   showToast("Zgłoszenie wysłane", "Admin zobaczy je na liście zgłoszeń.");
+}
+
+async function createReportComment(event) {
+  event.preventDefault();
+  const form = event.target;
+  const reportId = form.dataset.reportCommentForm;
+  const report = getReportById(reportId);
+  const input = form.querySelector("input[name='body']");
+  const body = input?.value.trim();
+  if (!report || !body) return;
+  openReportCommentId = String(reportId);
+
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/reports/${encodeURIComponent(report.id)}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+      form.reset();
+      applyReportSnapshot(result);
+      renderReportState();
+      showToast("Komentarz dodany", "Jest zapisany przy zgloszeniu.");
+      return;
+    } catch (error) {
+      showToast("Nie dodano komentarza", error.message || "Backend odrzucil zapis.");
+      return;
+    }
+  }
+
+  report.comments = normalizeEntityComments(report.comments);
+  report.comments.push(makeEntityComment(body));
+  report.updatedAt = "teraz";
+  form.reset();
+  saveReportState();
+  renderReportState();
+  showToast("Komentarz dodany", "Widac go przy zgloszeniu.");
+}
+
+async function toggleReportReaction(reportId, reactionId) {
+  const report = getReportById(reportId);
+  if (!report) return;
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/reports/${encodeURIComponent(report.id)}/reactions`, {
+        method: "POST",
+        body: JSON.stringify({ reactionId }),
+      });
+      applyReportSnapshot(result);
+      renderReportState();
+      showToast("Reakcja zapisana", report.title);
+      return;
+    } catch (error) {
+      showToast("Nie zapisano reakcji", error.message || "Backend odrzucil zmiane.");
+      return;
+    }
+  }
+  if (!toggleLocalEntityReaction(report, reactionId)) return;
+  saveReportState();
+  renderReportState();
+  showToast("Reakcja zapisana", report.title);
 }
 
 async function updateReportStatus(reportId, status) {
@@ -7421,6 +8558,7 @@ async function updateReportStatus(reportId, status) {
   }
   report.status = status;
   report.updatedAt = "teraz";
+  saveReportState();
   renderReportState();
   return report;
 }
@@ -7440,6 +8578,7 @@ async function deleteReport(reportId) {
     }
   }
   reports = reports.filter((item) => String(item.id) !== String(report.id));
+  saveReportState();
   renderReportState();
   return report;
 }
@@ -7517,6 +8656,7 @@ async function createChatGroup(event) {
       applyChatGroupSnapshot(snapshot);
       currentConversation = snapshot.createdGroup?.id || customGroupConversations.at(-1)?.id || currentConversation;
       event.target.reset();
+      closeChatNewMenu();
       renderChat();
       pushNotification("Nowa grupa czatu", `Utworzono grupę: ${name}`, {
         view: "chat",
@@ -7542,6 +8682,7 @@ async function createChatGroup(event) {
   saveChatGroupState();
   currentConversation = group.id;
   event.target.reset();
+  closeChatNewMenu();
   renderChat();
   pushNotification("Nowa grupa czatu", `Utworzono grupę: ${name}`, {
     view: "chat",
@@ -7814,6 +8955,7 @@ async function boot() {
   $("#breakButton").addEventListener("click", toggleBreak);
   $("#addTaskButton").addEventListener("click", openTaskForm);
   $("#taskForm").addEventListener("submit", createTask);
+  $("#taskCommentForm").addEventListener("submit", createTaskComment);
   $("#addEventButton").addEventListener("click", openCalendarForm);
   $("#calendarForm").addEventListener("submit", createCalendarEvent);
   $("#addInventoryButton").addEventListener("click", openInventoryForm);
@@ -7835,16 +8977,30 @@ async function boot() {
   $("#addPollButton").addEventListener("click", openPollForm);
   $("#pollForm").addEventListener("submit", createQuickPoll);
   $("#announcementForm").addEventListener("submit", createPost);
+  $("#postAudience").addEventListener("change", updateAnnouncementRecipientsVisibility);
+  updateAnnouncementRecipientsVisibility();
   $("#postCommentForm").addEventListener("submit", createPostComment);
   $("#leaveForm").addEventListener("submit", createLeaveRequest);
   $("#reportForm").addEventListener("submit", createReport);
   $("#chatForm").addEventListener("submit", createChatMessage);
   $("#chatGroupForm").addEventListener("submit", createChatGroup);
+  $("[data-chat-new-toggle]")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleChatNewMenu();
+  });
+  $("#chatNewMenu")?.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".chat-new-wrap")) closeChatNewMenu();
+  });
   $("#accountForm").addEventListener("submit", createAccount);
   $("#passwordForm").addEventListener("submit", changeOwnPassword);
   document.addEventListener("submit", async (event) => {
     if (event.target.matches("[data-account-password-form]")) {
       await changeManagedAccountPassword(event);
+      return;
+    }
+    if (event.target.matches("[data-report-comment-form]")) {
+      await createReportComment(event);
     }
   });
   $("[data-chat-attach]").addEventListener("click", () => $("#chatAttachmentInput").click());
@@ -8014,7 +9170,7 @@ async function boot() {
 
     const openTaskFormButton = event.target.closest("[data-open-task-form]");
     if (openTaskFormButton) {
-      openTaskForm();
+      openTaskForm(openTaskFormButton.dataset.taskColumn || "todo");
       openTaskFormButton.closest(".source-add-wrap")?.classList.remove("show");
       return;
     }
@@ -8074,6 +9230,49 @@ async function boot() {
     const calendarDayButton = event.target.closest("[data-calendar-day]");
     if (calendarDayButton) {
       openCalendarDayDetails(calendarDayButton.dataset.calendarDay);
+      return;
+    }
+
+    const feedReactionButton = event.target.closest("[data-feed-reaction]");
+    if (feedReactionButton) {
+      await toggleAnnouncementReaction(feedReactionButton.dataset.feedPost, feedReactionButton.dataset.feedReaction);
+      return;
+    }
+
+    const feedReadButton = event.target.closest("[data-feed-read]");
+    if (feedReadButton) {
+      const post = await markPostRead(feedReadButton.dataset.feedRead);
+      if (post) showToast("Odczyt potwierdzony", post.title);
+      return;
+    }
+
+    const feedCommentButton = event.target.closest("[data-feed-comment]");
+    if (feedCommentButton) {
+      await openPostComments(feedCommentButton.dataset.feedComment);
+      return;
+    }
+
+    const taskCommentButton = event.target.closest("[data-task-comment]");
+    if (taskCommentButton) {
+      openTaskComments(taskCommentButton.dataset.taskComment);
+      return;
+    }
+
+    const taskReactionButton = event.target.closest("[data-task-reaction]");
+    if (taskReactionButton) {
+      await toggleTaskReaction(taskReactionButton.dataset.taskReaction, taskReactionButton.dataset.reactionId);
+      return;
+    }
+
+    const reportCommentButton = event.target.closest("[data-report-comment]");
+    if (reportCommentButton) {
+      openReportComments(reportCommentButton.dataset.reportComment);
+      return;
+    }
+
+    const reportReactionButton = event.target.closest("[data-report-reaction]");
+    if (reportReactionButton) {
+      await toggleReportReaction(reportReactionButton.dataset.reportReaction, reportReactionButton.dataset.reactionId);
       return;
     }
 
@@ -8171,6 +9370,8 @@ async function boot() {
 
     const reactionButton = event.target.closest("[data-post-reaction]");
     if (reactionButton) {
+      await toggleAnnouncementReaction(activePostId, reactionButton.dataset.postReaction);
+      return;
       const post = getPostById(activePostId);
       const reactionId = reactionButton.dataset.postReaction;
       const reactions = post?.reactions?.[reactionId];
@@ -8309,6 +9510,14 @@ async function boot() {
       activateView("leaves");
       $("#leaveForm")?.scrollIntoView({ behavior: "smooth", block: "start" });
       window.setTimeout(() => $("#leaveType")?.focus(), 180);
+      return;
+    }
+
+    const accountFormFocusButton = event.target.closest("[data-focus-account-form]");
+    if (accountFormFocusButton) {
+      activateView("team");
+      $("#teamAccountAdmin")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.setTimeout(() => $("#accountNameInput")?.focus(), 180);
       return;
     }
 
