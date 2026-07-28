@@ -7613,12 +7613,20 @@ function formatFileSize(bytes) {
 }
 
 function fileIcon(fileType = "", fileName = "") {
-  if (fileType.startsWith("image/")) return "IMG";
-  if (fileType.startsWith("video/")) return "VID";
-  if (fileType.includes("pdf") || fileName.toLowerCase().endsWith(".pdf")) return "PDF";
-  if (fileType.includes("spreadsheet") || /\.(xlsx|xls|csv|ods)$/i.test(fileName)) return "XLS";
-  if (fileType.includes("word") || /\.(docx|doc)$/i.test(fileName)) return "DOC";
-  if (fileType.startsWith("text/") || /\.(txt|md|rtf)$/i.test(fileName)) return "TXT";
+  const normalizedType = String(fileType || "").toLowerCase();
+  const normalizedName = String(fileName || "").toLowerCase();
+  if (normalizedType.startsWith("image/")) return "IMG";
+  if (normalizedType.startsWith("video/")) return "VID";
+  if (normalizedType.includes("pdf") || normalizedName.endsWith(".pdf")) return "PDF";
+  if (
+    normalizedType.includes("spreadsheet") ||
+    normalizedType.includes("excel") ||
+    normalizedType.includes("csv") ||
+    normalizedType.includes("numbers") ||
+    /\.(xlsx|xls|csv|tsv|ods|numbers)$/i.test(normalizedName)
+  ) return "XLS";
+  if (normalizedType.includes("word") || /\.(docx|doc)$/i.test(normalizedName)) return "DOC";
+  if (normalizedType.startsWith("text/") || /\.(txt|md|rtf)$/i.test(normalizedName)) return "TXT";
   return "PLIK";
 }
 
@@ -7755,6 +7763,31 @@ function renderKnowledgeDocumentIcon(type = "PLIK") {
       <path d="M9 17h4"/>
     </svg>
   `;
+}
+
+function knowledgePreviewUrl(article) {
+  if (!article.fileUrl) return "";
+  const separator = article.fileUrl.includes("?") ? "&" : "?";
+  return `${article.fileUrl}${separator}preview=1`;
+}
+
+function renderKnowledgeVisual(article, typeLabel) {
+  if (String(article.type || "").toUpperCase() === "IMG" && article.fileUrl) {
+    const previewUrl = knowledgePreviewUrl(article);
+    return `
+      <a class="kb-icon kb-thumb" href="${escapeHtml(previewUrl)}" target="_blank" rel="noopener" aria-label="Podgląd: ${escapeHtml(article.title)}" title="${escapeHtml(typeLabel)}">
+        <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(article.title)}" loading="lazy" />
+      </a>
+    `;
+  }
+  if (article.linkUrl) {
+    return `
+      <a class="kb-icon" href="${escapeHtml(article.linkUrl)}" target="_blank" rel="noopener" aria-label="Otwórz link: ${escapeHtml(article.title)}" title="${escapeHtml(typeLabel)}">
+        ${renderKnowledgeDocumentIcon(article.type)}
+      </a>
+    `;
+  }
+  return `<span class="kb-icon" aria-label="${escapeHtml(typeLabel)}" title="${escapeHtml(typeLabel)}">${renderKnowledgeDocumentIcon(article.type)}</span>`;
 }
 
 async function openKnowledgeDetails(articleId) {
@@ -7943,9 +7976,12 @@ function renderKnowledge() {
     ? visibleArticles
     .map(
       (article) => {
-        const sizeLabel = article.fileSize ? formatFileSize(article.fileSize) : "";
+        const sizeLabel = article.fileName ? formatFileSize(article.fileSize) : "";
         const fileMeta = article.linkUrl ? article.linkUrl : [article.fileName, sizeLabel].filter(Boolean).join(" · ");
         const typeLabel = knowledgeTypeLabel(article.type);
+        const metaNode = article.linkUrl
+          ? `<a class="kb-meta-link" href="${escapeHtml(article.linkUrl)}" target="_blank" rel="noopener">${escapeHtml(article.linkUrl)}</a>`
+          : `<span class="muted">${escapeHtml(fileMeta || "Brak pliku")}</span>`;
         const createdMeta = [
           article.createdBy ? `Dodał: ${getDisplayNameByLogin(article.createdBy)}` : "",
           activityTimeLabel(article.createdAt, ""),
@@ -7954,7 +7990,7 @@ function renderKnowledge() {
           .join(" · ");
         return `
         <article class="kb-card">
-          <span class="kb-icon" aria-label="${escapeHtml(typeLabel)}" title="${escapeHtml(typeLabel)}">${renderKnowledgeDocumentIcon(article.type)}</span>
+          ${renderKnowledgeVisual(article, typeLabel)}
           <div>
             <div class="card-line">
               <strong>${escapeHtml(article.title)}</strong>
@@ -7963,7 +7999,7 @@ function renderKnowledge() {
             <p class="note">${escapeHtml(article.detail)}</p>
             ${createdMeta ? `<span class="muted">${escapeHtml(createdMeta)}</span>` : ""}
             <div class="card-line">
-              <span class="muted">${escapeHtml(fileMeta || "Brak pliku")}</span>
+              ${metaNode}
               <span class="card-actions">
                 <button class="secondary-button" data-kb-details="${escapeHtml(article.id)}" type="button">Szczegóły</button>
                 ${article.linkUrl ? `<a class="secondary-button" href="${escapeHtml(article.linkUrl)}" target="_blank" rel="noopener">Otwórz</a>` : ""}
@@ -8880,8 +8916,14 @@ function updateKnowledgeFormSource() {
   const linkInput = $("#kbLinkInput");
   fileField?.classList.toggle("hidden", sourceType !== "file");
   linkField?.classList.toggle("hidden", sourceType !== "link");
-  if (fileInput) fileInput.required = sourceType === "file";
-  if (linkInput) linkInput.required = sourceType === "link";
+  if (fileInput) {
+    fileInput.required = sourceType === "file";
+    fileInput.disabled = sourceType !== "file";
+  }
+  if (linkInput) {
+    linkInput.required = sourceType === "link";
+    linkInput.disabled = sourceType !== "link";
+  }
 }
 
 async function createKnowledgeArticle(event) {

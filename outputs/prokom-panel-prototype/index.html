@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=139" />
+    <link rel="stylesheet" href="styles.css?v=140" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -1386,10 +1386,10 @@
             </select>
           </label>
           <label>Tytuł dokumentu
-            <input id="kbTitleInput" name="title" required placeholder="Np. Instrukcja przyjęcia reklamacji" />
+            <input id="kbTitleInput" name="title" placeholder="Np. Instrukcja przyjęcia reklamacji" />
           </label>
           <label id="kbFileField">Plik
-            <input id="kbFileInput" name="document" required type="file" accept=".txt,.md,.csv,.xlsx,.xls,.ods,.pdf,.doc,.docx,image/*,video/*,text/*" />
+            <input id="kbFileInput" name="document" required type="file" accept=".txt,.md,.rtf,.csv,.tsv,.xlsx,.xls,.ods,.numbers,.pdf,.doc,.docx,image/*,video/*,text/*,text/csv,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,application/vnd.apple.numbers" />
           </label>
           <label id="kbLinkField" class="hidden">Link
             <input id="kbLinkInput" name="linkUrl" type="url" inputmode="url" placeholder="https://..." />
@@ -1421,7 +1421,7 @@
           <div><span>Nazwa pliku</span><strong id="kbDialogFileName"></strong></div>
           <div><span>Rozmiar</span><strong id="kbDialogFileSize"></strong></div>
           <div><span>Typ pliku</span><strong id="kbDialogMime"></strong></div>
-          <div id="kbDialogLinkRow" class="hidden"><span>Link</span><strong id="kbDialogLink"></strong></div>
+          <div id="kbDialogLinkRow" class="hidden"><span>Link</span><a id="kbDialogLink" class="kb-dialog-link" href="#" target="_blank" rel="noopener"></a></div>
         </div>
         <menu>
           <a class="secondary-button hidden" id="kbDialogDownload" href="#" download>Pobierz dokument</a>
@@ -1647,6 +1647,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <script src="data.js?v=78"></script>
-    <script src="app.js?v=141"></script>
+    <script src="app.js?v=142"></script>
   </body>
 </html>

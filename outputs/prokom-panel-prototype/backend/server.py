@@ -1317,6 +1317,7 @@ def storage_filename(article_id: str, original_filename: str) -> str:
 
 
 def knowledge_type_from_file(mime: str, filename: str) -> str:
+    mime = str(mime or "").lower()
     lowered = filename.lower()
     if mime.startswith("image/"):
         return "IMG"
@@ -1324,7 +1325,13 @@ def knowledge_type_from_file(mime: str, filename: str) -> str:
         return "VID"
     if "pdf" in mime or lowered.endswith(".pdf"):
         return "PDF"
-    if "spreadsheet" in mime or lowered.endswith((".xlsx", ".xls", ".csv", ".ods")):
+    if (
+        "spreadsheet" in mime
+        or "excel" in mime
+        or "csv" in mime
+        or "numbers" in mime
+        or lowered.endswith((".xlsx", ".xls", ".csv", ".tsv", ".ods", ".numbers"))
+    ):
         return "XLS"
     if "word" in mime or lowered.endswith((".docx", ".doc")):
         return "DOC"
@@ -4373,7 +4380,7 @@ class ProkomHandler(BaseHTTPRequestHandler):
             )
             self.send_json(response, HTTPStatus.CREATED)
             return
-        if not upload or not upload.get("content"):
+        if not upload or "content" not in upload:
             self.send_json({"error": "Wybierz plik dokumentu."}, HTTPStatus.BAD_REQUEST)
             return
         file_content = upload["content"]
@@ -4439,10 +4446,14 @@ class ProkomHandler(BaseHTTPRequestHandler):
             return
         filename = article["file_name"] or f"{article_id}.bin"
         raw = target.read_bytes()
+        content_type = article["file_mime"] or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        query = parse_qs(urlparse(self.path).query)
+        wants_preview = query.get("preview", [""])[0] == "1"
+        disposition = "inline" if wants_preview and content_type.startswith(("image/", "video/")) else "attachment"
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", article["file_mime"] or mimetypes.guess_type(filename)[0] or "application/octet-stream")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}")
+        self.send_header("Content-Disposition", f"{disposition}; filename*=UTF-8''{quote(filename)}")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(raw)
