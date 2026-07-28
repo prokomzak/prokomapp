@@ -18339,27 +18339,42 @@ table tbody tr:hover {
   height: 14px !important;
 }
 
+#knowledgeFormDialog {
+  width: min(1240px, calc(100vw - 36px));
+}
+
 #knowledgeFormDialog form {
-  width: min(1040px, calc(100vw - 40px));
+  width: 100%;
+  max-height: calc(100vh - 42px);
+  gap: 10px;
+  overflow: visible;
 }
 
 #knowledgeFormDialog .task-form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
 }
 
 #knowledgeFormDialog label {
   min-width: 0;
+  gap: 5px;
 }
 
 #knowledgeFormDialog select,
 #knowledgeFormDialog input,
 #knowledgeFormDialog textarea {
-  min-height: 42px;
+  min-height: 38px;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 #knowledgeFormDialog textarea {
-  min-height: 100px;
+  min-height: 74px;
+}
+
+#knowledgeFormDialog menu {
+  margin-top: 0;
+  padding-top: 2px;
 }
 
 #knowledge .kb-meta-tags {
