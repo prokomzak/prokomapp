@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=140" />
+    <link rel="stylesheet" href="styles.css?v=145" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -134,7 +134,7 @@
 
       <main class="main">
         <header class="topbar">
-          <button class="burger mobile-menu" id="menuToggle" type="button" aria-label="Menu">
+          <button class="burger mobile-menu" id="menuToggle" type="button" aria-label="Menu" aria-expanded="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
           </button>
           <form class="topbar-search search" id="globalSearchForm" role="search">
@@ -481,9 +481,27 @@
                   <input id="wageRateInput" type="number" min="0" step="0.01" placeholder="0,00" />
                 </label>
               </div>
+              <div class="saturday-wage-section">
+                <div class="saturday-wage-head">
+                  <div>
+                    <strong>Czas pracy w sobotę</strong>
+                    <span>Dodaj godziny sobotnie do bieżącego miesiąca.</span>
+                  </div>
+                  <span class="pill amber" id="wageSaturdayHoursBadge">0h 00m</span>
+                </div>
+                <div class="form-row saturday-wage-form">
+                  <label>Godziny sobotnie
+                    <input id="wageSaturdayHoursInput" type="number" min="0" step="0.25" placeholder="Np. 8" />
+                  </label>
+                  <label>Stawka sobotnia
+                    <input id="wageSaturdayRateInput" type="number" min="0" step="0.01" placeholder="Jak podstawowa" />
+                  </label>
+                </div>
+              </div>
               <div class="stats-row wage-summary">
-                <div><span>Godziny z grafiku</span><strong id="wageMonthHours">0h 00m</strong></div>
+                <div><span>Godziny podstawowe</span><strong id="wageMonthHours">0h 00m</strong></div>
                 <div><span>Stawka</span><strong id="wageRateDisplay">0,00 zł/h</strong></div>
+                <div><span>Soboty</span><strong id="wageSaturdayPayDisplay">0,00 zł</strong></div>
                 <div><span>Zarobek</span><strong id="wageTotalDisplay">0,00 zł</strong></div>
               </div>
             </article>
@@ -1385,14 +1403,39 @@
               <option value="link">Link</option>
             </select>
           </label>
+          <label>Kategoria
+            <select id="kbCategoryInput" name="category">
+              <option value="Instrukcja">Instrukcja</option>
+              <option value="Procedura">Procedura</option>
+              <option value="Arkusz">Arkusz</option>
+              <option value="Cennik">Cennik</option>
+              <option value="Formularz">Formularz</option>
+              <option value="Multimedia">Multimedia</option>
+              <option value="Link">Link</option>
+              <option value="Inne">Inne</option>
+            </select>
+          </label>
           <label>Tytuł dokumentu
             <input id="kbTitleInput" name="title" placeholder="Np. Instrukcja przyjęcia reklamacji" />
+          </label>
+          <label>Wersja / oznaczenie
+            <input id="kbVersionInput" name="versionLabel" placeholder="Np. v1.0, 2026-07" />
           </label>
           <label id="kbFileField">Plik
             <input id="kbFileInput" name="document" required type="file" accept=".txt,.md,.rtf,.csv,.tsv,.xlsx,.xls,.ods,.numbers,.pdf,.doc,.docx,image/*,video/*,text/*,text/csv,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,application/vnd.apple.numbers" />
           </label>
           <label id="kbLinkField" class="hidden">Link
             <input id="kbLinkInput" name="linkUrl" type="url" inputmode="url" placeholder="https://..." />
+          </label>
+          <label>Widoczność
+            <select id="kbVisibilityInput" name="visibility">
+              <option value="all">Cała firma</option>
+              <option value="team">Zespół</option>
+              <option value="admin">Tylko admin</option>
+            </select>
+          </label>
+          <label>Tagi
+            <input id="kbTagsInput" name="tags" placeholder="Np. magazyn, BHP, klient" />
           </label>
         </div>
         <label>Opis
@@ -1421,6 +1464,10 @@
           <div><span>Nazwa pliku</span><strong id="kbDialogFileName"></strong></div>
           <div><span>Rozmiar</span><strong id="kbDialogFileSize"></strong></div>
           <div><span>Typ pliku</span><strong id="kbDialogMime"></strong></div>
+          <div><span>Kategoria</span><strong id="kbDialogCategory"></strong></div>
+          <div><span>Wersja</span><strong id="kbDialogVersion"></strong></div>
+          <div><span>Widoczność</span><strong id="kbDialogVisibility"></strong></div>
+          <div><span>Tagi</span><strong id="kbDialogTags"></strong></div>
           <div id="kbDialogLinkRow" class="hidden"><span>Link</span><a id="kbDialogLink" class="kb-dialog-link" href="#" target="_blank" rel="noopener"></a></div>
         </div>
         <menu>
@@ -1647,6 +1694,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <script src="data.js?v=78"></script>
-    <script src="app.js?v=142"></script>
+    <script src="app.js?v=144"></script>
   </body>
 </html>

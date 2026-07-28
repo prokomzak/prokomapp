@@ -18210,6 +18210,235 @@ table tbody tr:hover {
   }
 }
 
+/* Current usability refinements. */
+@media (min-width: 821px) {
+  .app-shell {
+    grid-template-columns: 250px minmax(0, 1fr);
+    transition: grid-template-columns 190ms ease;
+  }
+
+  .sidebar {
+    width: 250px;
+    transform: translateX(0);
+    transition:
+      width 190ms ease,
+      padding 190ms ease,
+      transform 190ms ease,
+      opacity 160ms ease;
+  }
+
+  body.sidebar-collapsed .app-shell {
+    grid-template-columns: 76px minmax(0, 1fr) !important;
+  }
+
+  body.sidebar-collapsed .sidebar {
+    width: 76px !important;
+    min-width: 76px !important;
+    padding-right: 8px !important;
+    padding-left: 8px !important;
+    pointer-events: auto;
+    opacity: 1;
+    overflow: hidden;
+    transform: translateX(0);
+  }
+
+  body.sidebar-collapsed .sidebar .brand {
+    justify-content: center;
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+  }
+
+  body.sidebar-collapsed .sidebar .brand > div:not(.brand-mark):not(.logo),
+  body.sidebar-collapsed .nav-section,
+  body.sidebar-collapsed .nav-item > span:first-of-type,
+  body.sidebar-collapsed .sidebar-footer .role-switch,
+  body.sidebar-collapsed .sidebar-footer .ghost-button,
+  body.sidebar-collapsed .account-card > div:not(.avatar):not(.av) {
+    display: none !important;
+  }
+
+  body.sidebar-collapsed .nav-list {
+    align-items: center;
+    gap: 8px !important;
+  }
+
+  body.sidebar-collapsed .nav-item {
+    justify-content: center !important;
+    width: 44px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+  }
+
+  body.sidebar-collapsed .nav-item svg {
+    width: 19px !important;
+    height: 19px !important;
+  }
+
+  body.sidebar-collapsed .nav-alert {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    margin-left: 0;
+    padding: 0 4px;
+    font-size: 9px;
+  }
+
+  body.sidebar-collapsed .sidebar-footer {
+    align-items: center;
+  }
+
+  body.sidebar-collapsed .account-card {
+    justify-content: center !important;
+    width: 44px !important;
+    padding: 4px !important;
+  }
+
+  #menuToggle {
+    display: grid !important;
+  }
+}
+
+@media (min-width: 1200px) {
+  .nav-item {
+    min-height: 42px !important;
+    gap: 12px !important;
+    border-radius: 11px !important;
+    padding: 10px 13px !important;
+    font-size: 14px !important;
+  }
+
+  .nav-item svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+}
+
+.source-side-column .clock-card #liveTimer {
+  font-size: clamp(1.75rem, 2.45vw, 2.35rem) !important;
+  line-height: 1 !important;
+}
+
+.source-clock-meta {
+  font-size: 11px !important;
+}
+
+.source-head-actions .btn,
+.source-head-actions .primary-button,
+.source-head-actions .secondary-button {
+  min-height: 34px !important;
+  border-radius: 10px !important;
+  padding: 7px 12px !important;
+  font-size: 12px !important;
+}
+
+.source-head-actions .btn svg,
+.source-head-actions .primary-button svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+#knowledgeFormDialog form {
+  width: min(1040px, calc(100vw - 40px));
+}
+
+#knowledgeFormDialog .task-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#knowledgeFormDialog label {
+  min-width: 0;
+}
+
+#knowledgeFormDialog select,
+#knowledgeFormDialog input,
+#knowledgeFormDialog textarea {
+  min-height: 42px;
+}
+
+#knowledgeFormDialog textarea {
+  min-height: 100px;
+}
+
+#knowledge .kb-meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+#knowledge .kb-meta-tags span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1;
+}
+
+#time .saturday-wage-section {
+  margin: 0 16px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn), var(--border) 68%);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--warn-soft), var(--surface) 62%);
+  padding: 13px;
+}
+
+[data-theme="dark"] #time .saturday-wage-section {
+  background: color-mix(in srgb, var(--warn), var(--surface) 88%);
+}
+
+#time .saturday-wage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 11px;
+}
+
+#time .saturday-wage-head strong,
+#time .saturday-wage-head span {
+  display: block;
+}
+
+#time .saturday-wage-head strong {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 820;
+}
+
+#time .saturday-wage-head div > span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+#time .saturday-wage-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+#time .saturday-wage-form input {
+  min-height: 38px;
+}
+
+#time .wage-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+  #knowledgeFormDialog .task-form-grid,
+  #time .saturday-wage-form,
+  #time .wage-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
 #knowledge .kb-list {
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)) !important;
   gap: 10px !important;

@@ -77,6 +77,7 @@ let currentNotificationFilter = "all";
 let selectedScheduleWeekStart = "";
 let activeScheduleEdit = null;
 let wageRates = {};
+let wageSaturdayEntries = {};
 let selectedWageLogin = "";
 let userPreferences = { theme: "light", accent: "indigo" };
 let userPreferencesSaveSeq = 0;
@@ -88,7 +89,7 @@ const columnLabels = {
   done: "Zrobione",
 };
 
-let role = "admin";
+let role = "employee";
 let clockedIn = false;
 let breakActive = false;
 let startedAt = null;
@@ -157,6 +158,7 @@ const storageKeys = {
   quickPolls: "prokom-quick-polls-v1",
   weeklyKudos: "prokom-weekly-kudos-v1",
   wageRates: "prokom-wage-rates-v1",
+  wageSaturday: "prokom-wage-saturday-v1",
   inventory: "prokom-inventory-v1",
   feedPinnedIds: "prokom-feed-pinned-ids-v1",
   feedSeenIds: "prokom-feed-seen-ids-v1",
@@ -1256,9 +1258,45 @@ function saveWageRates() {
   writeStorage(storageKeys.wageRates, wageRates);
 }
 
+function wageMonthStorageKey(login = selectedWageLogin) {
+  const safeLogin = normalizeLogin(login || getActiveLogin());
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `${safeLogin}:${month}`;
+}
+
+function getSaturdayWageEntry(login = selectedWageLogin) {
+  const key = wageMonthStorageKey(login);
+  const entry = wageSaturdayEntries[key];
+  return entry && typeof entry === "object" ? entry : { seconds: 0, rate: null };
+}
+
+function saveSaturdayWageEntry(login, updates) {
+  const key = wageMonthStorageKey(login);
+  const previous = getSaturdayWageEntry(login);
+  const next = {
+    seconds: Math.max(0, Number(updates.seconds ?? previous.seconds) || 0),
+    rate: updates.rate === null || updates.rate === "" ? null : Math.max(0, Number(updates.rate ?? previous.rate) || 0),
+  };
+  wageSaturdayEntries[key] = next;
+  writeStorage(storageKeys.wageSaturday, wageSaturdayEntries);
+  return next;
+}
+
+function decimalHoursToSeconds(value) {
+  return Math.max(0, Number(String(value || "").replace(",", ".")) || 0) * 3600;
+}
+
+function hoursInputValueFromSeconds(seconds = 0) {
+  const hours = Math.max(0, Number(seconds) || 0) / 3600;
+  return hours ? String(Number(hours.toFixed(2))) : "";
+}
+
 function renderWageCalculator() {
   const select = $("#wageUserSelect");
   const rateInput = $("#wageRateInput");
+  const saturdayHoursInput = $("#wageSaturdayHoursInput");
+  const saturdayRateInput = $("#wageSaturdayRateInput");
   if (!select || !rateInput) return;
   const wagePeople = getWagePeople();
   const fallbackLogin = role === "admin" ? wagePeople[0]?.login : getActiveLogin();
@@ -1276,11 +1314,27 @@ function renderWageCalculator() {
     rateInput.value = rate ? String(rate.toFixed(2)) : "";
   }
   const person = wagePeople.find((item) => item.login === selectedWageLogin) || {};
-  const monthSeconds = Number(person.scheduledMonthSeconds ?? timeSummary?.personal?.scheduledMonthSeconds ?? 0);
-  const hours = monthSeconds / 3600;
+  const scheduledMonthSeconds = Number(person.scheduledMonthSeconds ?? timeSummary?.personal?.scheduledMonthSeconds ?? 0);
+  const trackedMonthSeconds = Number(person.monthSeconds ?? timeSummary?.personal?.monthSeconds ?? 0);
+  const monthSeconds = Math.max(scheduledMonthSeconds, trackedMonthSeconds);
+  const saturdayEntry = getSaturdayWageEntry(selectedWageLogin);
+  const saturdayRate = saturdayEntry.rate === null || saturdayEntry.rate === undefined ? rate : Math.max(0, Number(saturdayEntry.rate) || 0);
+  const basePay = (monthSeconds / 3600) * rate;
+  const saturdayPay = (Number(saturdayEntry.seconds || 0) / 3600) * saturdayRate;
   $("#wageMonthHours").textContent = formatWorkDuration(monthSeconds);
   $("#wageRateDisplay").textContent = formatHourlyRate(rate);
-  $("#wageTotalDisplay").textContent = formatMoney(hours * rate);
+  $("#wageSaturdayPayDisplay").textContent = formatMoney(saturdayPay);
+  $("#wageTotalDisplay").textContent = formatMoney(basePay + saturdayPay);
+  $("#wageSaturdayHoursBadge").textContent = formatWorkDuration(saturdayEntry.seconds || 0);
+  if (saturdayHoursInput && document.activeElement !== saturdayHoursInput) {
+    saturdayHoursInput.value = hoursInputValueFromSeconds(saturdayEntry.seconds || 0);
+  }
+  if (saturdayRateInput && document.activeElement !== saturdayRateInput) {
+    saturdayRateInput.value = saturdayEntry.rate === null || saturdayEntry.rate === undefined ? "" : String(Number(saturdayEntry.rate).toFixed(2));
+  }
+  if (saturdayRateInput) {
+    saturdayRateInput.placeholder = rate ? `Domyślnie ${rate.toFixed(2)}` : "Jak podstawowa";
+  }
   const monthLabel = $("#wageMonthLabel");
   if (monthLabel) {
     monthLabel.textContent = new Intl.DateTimeFormat("pl-PL", { month: "long", year: "numeric" }).format(new Date());
@@ -1955,6 +2009,10 @@ function normalizeKnowledgeArticle(article) {
     fileSize: Number(article.fileSize || article.file_size || 0),
     fileUrl: article.fileUrl || article.file_url || "",
     linkUrl: article.linkUrl || article.link_url || "",
+    category: article.category || "",
+    tags: article.tags || "",
+    versionLabel: article.versionLabel || article.version_label || "",
+    visibility: article.visibility || "all",
     createdBy: article.createdBy || article.created_by || "",
     createdAt: article.createdAt || article.created_at || "",
   };
@@ -1993,6 +2051,10 @@ function knowledgeSignature() {
       article.fileName,
       article.fileSize,
       article.linkUrl,
+      article.category,
+      article.tags,
+      article.versionLabel,
+      article.visibility,
     ]),
     notes: handoverNotes.map((note) => [
       note.id,
@@ -2444,6 +2506,8 @@ function loadStoredState() {
   weeklyKudos = Array.isArray(storedKudos) ? storedKudos.map(normalizeKudosEntry).filter(Boolean) : [];
   const storedWageRates = readStorage(storageKeys.wageRates, {});
   wageRates = storedWageRates && typeof storedWageRates === "object" ? storedWageRates : {};
+  const storedSaturdayWage = readStorage(storageKeys.wageSaturday, {});
+  wageSaturdayEntries = storedSaturdayWage && typeof storedSaturdayWage === "object" ? storedSaturdayWage : {};
   const storedInventory = readStorage(storageKeys.inventory, []);
   inventoryItems = Array.isArray(storedInventory) ? storedInventory.map(normalizeInventoryItem).filter(Boolean) : [];
   normalizeRequests();
@@ -3058,7 +3122,7 @@ function findAccountByLogin(login) {
   return accounts.find((item) => item.login === normalizeLogin(login) && item.active !== false);
 }
 
-function renderAccountOptions(preferredLogin = $("#accountSelect")?.value || "tadeusz") {
+function renderAccountOptions(preferredLogin = $("#accountSelect")?.value || "") {
   const select = $("#accountSelect");
   if (!select) return;
   const accounts = activeAccounts();
@@ -3069,7 +3133,8 @@ function renderAccountOptions(preferredLogin = $("#accountSelect")?.value || "ta
       return `<option value="${escapeHtml(account.login)}">${escapeHtml(account.login)} - ${label}</option>`;
     })
     .join("");
-  const nextLogin = accounts.some((account) => account.login === preferredLogin) ? preferredLogin : accounts[0]?.login;
+  const fallbackLogin = accounts.find((account) => !account.isRoot)?.login || accounts[0]?.login;
+  const nextLogin = accounts.some((account) => account.login === preferredLogin) ? preferredLogin : fallbackLogin;
   if (nextLogin) select.value = nextLogin;
   updateLoginFields();
 }
@@ -3084,7 +3149,6 @@ async function signIn(login, password = "") {
       currentUser = normalizeApiAccount(result.user);
       role = currentUser.role;
       applyUserPreferences(currentUser.preferences || readLocalUserPreferences(currentUser.login));
-      localStorage.setItem("prokom-user", JSON.stringify({ login: currentUser.login, backend: true }));
       await syncAccountsFromBackend(currentUser.login, { silent: true });
       await syncTimeSummaryFromBackend({ silent: true });
       await syncAnnouncementsFromBackend({ silent: true });
@@ -3127,10 +3191,6 @@ async function signIn(login, password = "") {
   currentUser = { ...account };
   role = account.role;
   applyUserPreferences(readLocalUserPreferences(account.login));
-  localStorage.setItem(
-    "prokom-user",
-    JSON.stringify({ login: account.login, passwordVerified: Boolean(account.password) }),
-  );
   $("#loginError").classList.add("hidden");
   refreshUserScopedUi();
   activateView("dashboard");
@@ -3162,68 +3222,31 @@ function signOut() {
   seenFeedItemIds.clear();
   freshFeedItemIds.clear();
   currentUser = null;
+  role = "employee";
   applyUserPreferences(defaultUserPreferences);
   localStorage.removeItem("prokom-user");
-  renderAccountOptions("tadeusz");
+  renderAccountOptions($("#accountSelect")?.value || "");
   $("#passwordInput").value = "";
   updateLoginFields();
   updateAuthUi();
 }
 
-async function restoreSession() {
+async function prepareLoggedOutSession() {
+  currentUser = null;
+  role = "employee";
+  localStorage.removeItem("prokom-user");
   if (backendAvailable) {
     try {
-      const result = await apiRequest("/me");
-      currentUser = normalizeApiAccount(result.user);
-      role = currentUser.role;
-      applyUserPreferences(currentUser.preferences || readLocalUserPreferences(currentUser.login));
-      localStorage.setItem("prokom-user", JSON.stringify({ login: currentUser.login, backend: true }));
-      await syncAccountsFromBackend(currentUser.login, { silent: true });
-      await syncTimeSummaryFromBackend({ silent: true });
-      await syncAnnouncementsFromBackend({ silent: true });
-      await syncTasksFromBackend({ silent: true });
-      await syncReportsFromBackend({ silent: true });
-      await syncRequestsFromBackend({ silent: true });
-      await syncCalendarFromBackend({ silent: true });
-      await syncKnowledgeFromBackend({ silent: true });
-      await syncInventoryFromBackend({ silent: true });
-      await syncQuickPollsFromBackend({ silent: true });
-      await syncKudosFromBackend({ silent: true });
-      await syncChatGroupsFromBackend({ silent: true });
-      await syncVisibleChatMessagesFromBackend();
-      startSharedDataPolling();
-      startChatPolling();
-      startPresencePolling();
-      refreshUserScopedUi();
-      return;
+      await apiRequest("/logout", { method: "POST" });
     } catch {
-      localStorage.removeItem("prokom-user");
-      updateAuthUi();
-      return;
+      // The login screen should still be shown when the backend cannot clear a stale cookie.
     }
   }
-
-  const savedSession = localStorage.getItem("prokom-user");
-  let parsedSession = null;
-  try {
-    parsedSession = savedSession ? JSON.parse(savedSession) : null;
-  } catch {
-    parsedSession = { login: savedSession, passwordVerified: false };
-  }
-  const account = findAccountByLogin(parsedSession?.login);
-  if (!account) {
-    updateAuthUi();
-    return;
-  }
-  if (account.password && !parsedSession.passwordVerified) {
-    localStorage.removeItem("prokom-user");
-    updateAuthUi();
-    return;
-  }
-  currentUser = { ...account };
-  role = account.role;
-  applyUserPreferences(readLocalUserPreferences(account.login));
-  refreshUserScopedUi();
+  applyUserPreferences(defaultUserPreferences);
+  renderAccountOptions($("#accountSelect")?.value || "");
+  $("#passwordInput").value = "";
+  updateLoginFields();
+  updateAuthUi();
 }
 
 function formatTimer(ms) {
@@ -3307,6 +3330,28 @@ function updateClockControls() {
   $("#timeClockButton").textContent = clockedIn ? "Wybijam się" : "Wbijam się";
   $("#breakButton").textContent = breakActive ? "Koniec przerwy" : "Przerwa";
   $("#breakButton").disabled = !clockedIn;
+}
+
+function toggleSidebarNavigation() {
+  const sidebar = $(".sidebar");
+  const button = $("#menuToggle");
+  const isMobile = window.matchMedia("(max-width: 820px)").matches;
+  if (isMobile) {
+    const opened = sidebar.classList.toggle("open");
+    document.body.classList.remove("sidebar-collapsed");
+    button?.setAttribute("aria-expanded", String(opened));
+    return;
+  }
+  sidebar.classList.remove("open");
+  const collapsed = document.body.classList.toggle("sidebar-collapsed");
+  button?.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function resetDesktopSidebarStateOnResize() {
+  if (window.matchMedia("(max-width: 820px)").matches) {
+    document.body.classList.remove("sidebar-collapsed");
+    $("#menuToggle")?.setAttribute("aria-expanded", String($(".sidebar")?.classList.contains("open")));
+  }
 }
 
 function setCurrentPersonPresence(state) {
@@ -4319,7 +4364,7 @@ function renderActivityFeedItemLegacy(item) {
       <div class="feed-meta sub">${escapeHtml(item.meta)}</div>
       ${item.extraHtml || ""}
       <div class="item-actions feed-card-actions">
-        <button class="rbtn" data-feed-pin="${escapeHtml(item.id)}" type="button">${item.pinned ? "📌" : "📍"}</button>
+        <button class="rbtn" data-feed-pin="${escapeHtml(item.id)}" type="button" title="${item.pinned ? "Odepnij" : "Przypnij"}">${item.pinned ? "📌" : "📍"}</button>
         <button class="rbtn" data-feed-detail="${escapeHtml(item.id)}" type="button">💬 0</button>
         <span class="rbtn ${item.unread ? "" : "on"}">${item.unread ? "Do odczytu" : "✓ Odczytane"}</span>
         <button class="mini" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
@@ -4345,7 +4390,7 @@ function renderActivityFeedItemLegacy(item) {
       <div class="feed-meta">${escapeHtml(item.meta)}</div>
       ${item.extraHtml || ""}
       <div class="feed-card-actions">
-        <button class="secondary-button" data-feed-pin="${escapeHtml(item.id)}" type="button">${
+        <button class="secondary-button" data-feed-pin="${escapeHtml(item.id)}" type="button" title="${item.pinned ? "Odepnij" : "Przypnij"}">${
           item.pinned ? "Odepnij" : "Przypnij"
         }</button>
         <button class="secondary-button" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
@@ -4364,7 +4409,7 @@ function getFeedAnnouncementPost(item) {
 function renderActivityFeedReactions(item) {
   const pinButton = `<button class="rbtn feed-pin-button" data-feed-pin="${escapeHtml(item.id)}" type="button" aria-label="${
     item.pinned ? "Odepnij wpis" : "Przypnij wpis"
-  }">${item.pinned ? "&#128204;" : "&#128205;"}</button>`;
+  }" title="${item.pinned ? "Odepnij" : "Przypnij"}">${item.pinned ? "&#128204;" : "&#128205;"}</button>`;
   const post = getFeedAnnouncementPost(item);
   if (!post) {
     const task = item.category === "tasks" ? getTaskRef(item.target?.taskId)?.task : null;
@@ -7709,7 +7754,18 @@ function articleMatchesKnowledgeSearch(article) {
   const query = normalizeSearch(kbSearchQuery);
   if (!query) return true;
   return normalizeSearch(
-    [article.title, article.detail, article.type, article.fileName, article.fileMime, article.linkUrl]
+    [
+      article.title,
+      article.detail,
+      article.type,
+      article.fileName,
+      article.fileMime,
+      article.linkUrl,
+      article.category,
+      article.tags,
+      article.versionLabel,
+      knowledgeVisibilityLabel(article.visibility),
+    ]
       .filter(Boolean)
       .join(" "),
   ).includes(query);
@@ -7746,6 +7802,15 @@ function knowledgeTypeLabel(type = "") {
     PLIK: "Plik",
   };
   return labels[normalized] || type || "Dokument";
+}
+
+function knowledgeVisibilityLabel(value = "all") {
+  const labels = {
+    all: "Cała firma",
+    team: "Zespół",
+    admin: "Tylko admin",
+  };
+  return labels[String(value || "all")] || "Cała firma";
 }
 
 function renderKnowledgeDocumentIcon(type = "PLIK") {
@@ -7809,6 +7874,10 @@ async function openKnowledgeDetails(articleId) {
   $("#kbDialogFileName").textContent = article.fileName || "Brak pliku";
   $("#kbDialogFileSize").textContent = article.fileSize ? formatFileSize(article.fileSize) : "Brak danych";
   $("#kbDialogMime").textContent = article.fileMime || "Brak danych";
+  $("#kbDialogCategory").textContent = article.category || "Bez kategorii";
+  $("#kbDialogVersion").textContent = article.versionLabel || "Brak";
+  $("#kbDialogVisibility").textContent = knowledgeVisibilityLabel(article.visibility);
+  $("#kbDialogTags").textContent = article.tags || "Brak tagów";
   const linkRow = $("#kbDialogLinkRow");
   const linkText = $("#kbDialogLink");
   const openLink = $("#kbDialogOpenLink");
@@ -7817,9 +7886,11 @@ async function openKnowledgeDetails(articleId) {
     linkRow.classList.toggle("hidden", !hasLink);
     linkText.textContent = hasLink ? article.linkUrl : "";
     if (hasLink) {
+      linkText.href = article.linkUrl;
       openLink.href = article.linkUrl;
       openLink.classList.remove("hidden");
     } else {
+      linkText.removeAttribute("href");
       openLink.removeAttribute("href");
       openLink.classList.add("hidden");
     }
@@ -7982,6 +8053,11 @@ function renderKnowledge() {
         const metaNode = article.linkUrl
           ? `<a class="kb-meta-link" href="${escapeHtml(article.linkUrl)}" target="_blank" rel="noopener">${escapeHtml(article.linkUrl)}</a>`
           : `<span class="muted">${escapeHtml(fileMeta || "Brak pliku")}</span>`;
+        const cardTags = String(article.tags || "")
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+          .slice(0, 3);
         const createdMeta = [
           article.createdBy ? `Dodał: ${getDisplayNameByLogin(article.createdBy)}` : "",
           activityTimeLabel(article.createdAt, ""),
@@ -7995,6 +8071,12 @@ function renderKnowledge() {
             <div class="card-line">
               <strong>${escapeHtml(article.title)}</strong>
               <span class="pill">${escapeHtml(typeLabel)}</span>
+            </div>
+            <div class="kb-meta-tags">
+              ${article.category ? `<span>${escapeHtml(article.category)}</span>` : ""}
+              ${article.versionLabel ? `<span>${escapeHtml(article.versionLabel)}</span>` : ""}
+              <span>${escapeHtml(knowledgeVisibilityLabel(article.visibility))}</span>
+              ${cardTags.map((tag) => `<span>#${escapeHtml(tag)}</span>`).join("")}
             </div>
             <p class="note">${escapeHtml(article.detail)}</p>
             ${createdMeta ? `<span class="muted">${escapeHtml(createdMeta)}</span>` : ""}
@@ -8934,6 +9016,10 @@ async function createKnowledgeArticle(event) {
   const linkUrl = $("#kbLinkInput")?.value.trim() || "";
   const title = $("#kbTitleInput").value.trim();
   const detail = $("#kbDetailInput").value.trim();
+  const category = $("#kbCategoryInput")?.value || "";
+  const tags = $("#kbTagsInput")?.value.trim() || "";
+  const versionLabel = $("#kbVersionInput")?.value.trim() || "";
+  const visibility = $("#kbVisibilityInput")?.value || "all";
   if (sourceType === "file" && !file) {
     showToast("Wybierz plik", "Dokument musi zawierać prawdziwy załącznik.");
     return;
@@ -8966,6 +9052,10 @@ async function createKnowledgeArticle(event) {
     fileMime: sourceType === "file" ? file.type : "",
     fileSize: sourceType === "file" ? file.size : 0,
     linkUrl: sourceType === "link" ? linkUrl : "",
+    category,
+    tags,
+    versionLabel,
+    visibility,
   };
   if (backendAvailable) {
     try {
@@ -9028,7 +9118,7 @@ async function boot() {
   applyRole();
   renderTimer();
   renderAccountOptions();
-  await restoreSession();
+  await prepareLoggedOutSession();
 
   $("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -9168,7 +9258,8 @@ async function boot() {
     $("#globalSearchInput").value = event.target.value;
     renderSearch(event.target.value);
   });
-  $("#menuToggle").addEventListener("click", () => $(".sidebar").classList.toggle("open"));
+  $("#menuToggle").addEventListener("click", toggleSidebarNavigation);
+  window.addEventListener("resize", resetDesktopSidebarStateOnResize);
   $("#notificationsButton").addEventListener("click", () => openDialog("#notificationsDialog", { toggle: true }));
   $("#notificationTypeFilter").addEventListener("change", (event) => {
     currentNotificationFilter = event.target.value || "all";
@@ -9216,6 +9307,19 @@ async function boot() {
     const rate = Math.max(0, Number(event.target.value.replace(",", ".")) || 0);
     wageRates[selectedWageLogin || getActiveLogin()] = rate;
     saveWageRates();
+    renderWageCalculator();
+  });
+  $("#wageSaturdayHoursInput")?.addEventListener("input", (event) => {
+    saveSaturdayWageEntry(selectedWageLogin || getActiveLogin(), {
+      seconds: decimalHoursToSeconds(event.target.value),
+    });
+    renderWageCalculator();
+  });
+  $("#wageSaturdayRateInput")?.addEventListener("input", (event) => {
+    const raw = String(event.target.value || "").trim();
+    saveSaturdayWageEntry(selectedWageLogin || getActiveLogin(), {
+      rate: raw ? Math.max(0, Number(raw.replace(",", ".")) || 0) : null,
+    });
     renderWageCalculator();
   });
   $("#correctionButton").addEventListener("click", async () => {

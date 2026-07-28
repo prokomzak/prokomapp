@@ -549,6 +549,10 @@ def ensure_knowledge_schema(conn: sqlite3.Connection) -> None:
         ("file_size", "file_size INTEGER NOT NULL DEFAULT 0"),
         ("file_storage_name", "file_storage_name TEXT"),
         ("link_url", "link_url TEXT"),
+        ("category", "category TEXT"),
+        ("tags", "tags TEXT"),
+        ("version_label", "version_label TEXT"),
+        ("visibility", "visibility TEXT NOT NULL DEFAULT 'all'"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE knowledge_articles ADD COLUMN {definition}")
@@ -1066,6 +1070,10 @@ def initialize_database() -> None:
               file_size INTEGER NOT NULL DEFAULT 0,
               file_storage_name TEXT,
               link_url TEXT,
+              category TEXT,
+              tags TEXT,
+              version_label TEXT,
+              visibility TEXT NOT NULL DEFAULT 'all',
               created_by TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY (created_by) REFERENCES users(login) ON DELETE SET NULL
@@ -1180,7 +1188,7 @@ def initialize_database() -> None:
             "database_role": "LAN server local file",
             "planned_lan_ip": "192.168.1.101",
             "backend": "python-standard-library",
-            "schema_version": "23",
+            "schema_version": "24",
         }
         for key, value in meta.items():
             conn.execute(
@@ -2329,6 +2337,10 @@ def knowledge_article_payload(row: sqlite3.Row) -> dict:
     file_mime = row["file_mime"] if "file_mime" in row.keys() else None
     file_size = row["file_size"] if "file_size" in row.keys() else 0
     link_url = row["link_url"] if "link_url" in row.keys() else None
+    category = row["category"] if "category" in row.keys() else None
+    tags = row["tags"] if "tags" in row.keys() else None
+    version_label = row["version_label"] if "version_label" in row.keys() else None
+    visibility = row["visibility"] if "visibility" in row.keys() else None
     return {
         "id": row["id"],
         "type": row["type"],
@@ -2339,6 +2351,10 @@ def knowledge_article_payload(row: sqlite3.Row) -> dict:
         "fileSize": int(file_size or 0),
         "fileUrl": f"/api/knowledge/articles/{quote(str(row['id']))}/download" if file_storage_name else "",
         "linkUrl": link_url or "",
+        "category": category or "",
+        "tags": tags or "",
+        "versionLabel": version_label or "",
+        "visibility": visibility or "all",
         "createdBy": row["created_by"],
         "createdAt": row["created_at"],
     }
@@ -4344,6 +4360,12 @@ class ProkomHandler(BaseHTTPRequestHandler):
         title = str(fields.get("title", "")).strip()
         detail = str(fields.get("detail", "")).strip()
         link_url = normalize_knowledge_link(fields.get("linkUrl", ""))
+        category = str(fields.get("category", "")).strip()[:80]
+        tags = str(fields.get("tags", "")).strip()[:240]
+        version_label = str(fields.get("versionLabel", "")).strip()[:80]
+        visibility = str(fields.get("visibility", "all")).strip().lower()
+        if visibility not in {"all", "team", "admin"}:
+            visibility = "all"
         if not detail:
             self.send_json({"error": "Dodaj opis dokumentu."}, HTTPStatus.BAD_REQUEST)
             return
@@ -4357,15 +4379,20 @@ class ProkomHandler(BaseHTTPRequestHandler):
             conn.execute(
                 """
                 INSERT INTO knowledge_articles(
-                  id, type, title, detail, file_name, file_mime, file_size, file_storage_name, link_url, created_by, created_at
+                  id, type, title, detail, file_name, file_mime, file_size, file_storage_name, link_url,
+                  category, tags, version_label, visibility, created_by, created_at
                 )
-                VALUES(?, 'LINK', ?, ?, NULL, NULL, 0, NULL, ?, ?, ?)
+                VALUES(?, 'LINK', ?, ?, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     article_id,
                     title,
                     detail,
                     link_url,
+                    category,
+                    tags,
+                    version_label,
+                    visibility,
                     user["login"],
                     now_text(),
                 ),
@@ -4399,9 +4426,10 @@ class ProkomHandler(BaseHTTPRequestHandler):
         conn.execute(
             """
             INSERT INTO knowledge_articles(
-              id, type, title, detail, file_name, file_mime, file_size, file_storage_name, link_url, created_by, created_at
+              id, type, title, detail, file_name, file_mime, file_size, file_storage_name, link_url,
+              category, tags, version_label, visibility, created_by, created_at
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
             """,
             (
                 article_id,
@@ -4412,6 +4440,10 @@ class ProkomHandler(BaseHTTPRequestHandler):
                 file_mime,
                 len(file_content),
                 stored_name,
+                category,
+                tags,
+                version_label,
+                visibility,
                 user["login"],
                 now_text(),
             ),
