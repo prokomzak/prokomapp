@@ -2654,12 +2654,20 @@ legend {
   order: 30;
 }
 
-.nav-item[data-view="knowledge"] {
+.nav-item[data-view="storeShortages"] {
   order: 31;
 }
 
-.nav-item[data-view="team"] {
+.nav-item[data-view="inventory"] {
   order: 32;
+}
+
+.nav-item[data-view="knowledge"] {
+  order: 33;
+}
+
+.nav-item[data-view="team"] {
+  order: 34;
 }
 
 .nav-section[data-nav-section="system"] {
@@ -12435,16 +12443,20 @@ table tbody tr:hover {
   order: 30;
 }
 
-.nav-item[data-view="inventory"] {
+.nav-item[data-view="storeShortages"] {
   order: 31;
 }
 
-.nav-item[data-view="knowledge"] {
+.nav-item[data-view="inventory"] {
   order: 32;
 }
 
-.nav-item[data-view="team"] {
+.nav-item[data-view="knowledge"] {
   order: 33;
+}
+
+.nav-item[data-view="team"] {
+  order: 34;
 }
 
 .nav-section[data-nav-section="system"] {

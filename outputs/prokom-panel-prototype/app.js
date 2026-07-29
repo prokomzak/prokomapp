@@ -8125,6 +8125,18 @@ function renderNavNotificationBadges(sourceNotifications = getVisibleNotificatio
   });
 }
 
+function ensureCompanyNavOrder() {
+  const companyLabel = document.querySelector('[data-nav-section="company"]');
+  const shortagesButton = document.querySelector('.nav-item[data-view="storeShortages"]');
+  const inventoryButton = document.querySelector('.nav-item[data-view="inventory"]');
+  const nav = companyLabel?.parentElement;
+  if (!nav || !shortagesButton || !inventoryButton) return;
+  if (shortagesButton.parentElement !== nav || inventoryButton.parentElement !== nav) return;
+  if (inventoryButton.previousElementSibling !== shortagesButton) {
+    nav.insertBefore(shortagesButton, inventoryButton);
+  }
+}
+
 function renderNotifications() {
   const allNotifications = getVisibleNotifications();
   renderNotificationFilterOptions(allNotifications);
@@ -10205,6 +10217,7 @@ async function boot() {
   renderAccountOptions();
   await prepareLoggedOutSession();
 
+  ensureCompanyNavOrder();
   $("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await signIn($("#accountSelect").value, $("#passwordInput").value);
