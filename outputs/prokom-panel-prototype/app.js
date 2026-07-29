@@ -64,6 +64,8 @@ let kbArticles = [];
 let inventoryItems = [];
 let inventorySearchQuery = "";
 let currentInventoryFilter = "all";
+let storeShortages = [];
+let currentStoreShortageFilter = "all";
 
 let calendarEvents = [];
 let timeSummary = null;
@@ -76,6 +78,7 @@ let selectedActivitySort = "time-desc";
 let currentNotificationFilter = "all";
 let selectedScheduleWeekStart = "";
 let activeScheduleEdit = null;
+let activeAdminTimeEdit = null;
 let wageRates = {};
 let wageSaturdayEntries = {};
 let selectedWageLogin = "";
@@ -117,6 +120,7 @@ let feedSeenTimer = null;
 const pinnedFeedItemIds = new Set();
 const seenFeedItemIds = new Set();
 const freshFeedItemIds = new Set();
+const expandedFeedCommentIds = new Set();
 let taskPollTimer = null;
 let taskPollInFlight = false;
 const taskPollIntervalMs = 5000;
@@ -160,6 +164,7 @@ const storageKeys = {
   wageRates: "prokom-wage-rates-v1",
   wageSaturday: "prokom-wage-saturday-v1",
   inventory: "prokom-inventory-v1",
+  storeShortages: "prokom-store-shortages-v1",
   feedPinnedIds: "prokom-feed-pinned-ids-v1",
   feedSeenIds: "prokom-feed-seen-ids-v1",
   userPreferences: "prokom-user-preferences-v1",
@@ -169,6 +174,7 @@ const defaultNotificationPreferences = {
   chat: true,
   tasks: true,
   inventory: true,
+  storeShortages: true,
   reports: true,
   announcements: true,
   time: true,
@@ -201,6 +207,7 @@ const viewTitles = {
   calendar: "Kalendarz",
   reports: "Zgłoszenia",
   chat: "Czat",
+  storeShortages: "Braki na sklepie",
   inventory: "Magazyn",
   knowledge: "Dokumenty",
   team: "Zespół",
@@ -221,6 +228,7 @@ const notificationFilters = [
   { id: "leaves", label: "Urlopy" },
   { id: "calendar", label: "Kalendarz" },
   { id: "inventory", label: "Magazyn" },
+  { id: "storeShortages", label: "Braki na sklepie" },
   { id: "knowledge", label: "Baza wiedzy" },
   { id: "team", label: "Zespół" },
   { id: "dashboard", label: "Inne" },
@@ -230,6 +238,7 @@ const notificationSourceOptions = [
   { id: "chat", label: "Wiadomości czatu" },
   { id: "tasks", label: "Nowe zadania" },
   { id: "inventory", label: "Niskie stany magazynu" },
+  { id: "storeShortages", label: "Braki na sklepie" },
   { id: "reports", label: "Zgłoszenia" },
   { id: "announcements", label: "Ogłoszenia" },
   { id: "time", label: "Czas pracy" },
@@ -243,10 +252,7 @@ const feedTypeFilters = [
   { id: "announcements", label: "Ogłoszenia" },
   { id: "reports", label: "Zgłoszenia" },
   { id: "tasks", label: "Zadania" },
-  { id: "time", label: "Czas pracy" },
-  { id: "leaves", label: "Urlopy" },
   { id: "calendar", label: "Kalendarz" },
-  { id: "handover", label: "Zeszyt zmiany" },
 ];
 
 const calendarSources = [
@@ -285,6 +291,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function escapeSelectorValue(value) {
+  return String(value ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function normalizeSearch(value) {
@@ -399,12 +409,6 @@ function renderSettings() {
   });
   $$("[data-settings-accent]").forEach((input) => {
     input.checked = input.value === userPreferences.accent;
-  });
-  $$("[data-source-theme]").forEach((button) => {
-    button.classList.toggle("on", button.dataset.sourceTheme === userPreferences.theme);
-  });
-  $$("[data-source-accent]").forEach((button) => {
-    button.classList.toggle("on", button.dataset.sourceAccent === userPreferences.accent);
   });
   $$("[data-settings-notification]").forEach((input) => {
     input.checked = notificationSourceEnabled(input.value);
@@ -806,6 +810,188 @@ function renderTimeDayLog() {
   list.innerHTML = fallback.length
     ? renderRows(fallback)
     : `<div class="empty-state">Brak zarejestrowanej obecności dla dzisiejszego dnia.</div>`;
+}
+
+function timeInputFromIso(value) {
+  const parsed = value ? new Date(value) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) return "";
+  return `${String(parsed.getHours()).padStart(2, "0")}:${String(parsed.getMinutes()).padStart(2, "0")}`;
+}
+
+function dateInputFromIso(value) {
+  const parsed = value ? new Date(value) : null;
+  return parsed && !Number.isNaN(parsed.getTime()) ? formatDateInput(parsed) : "";
+}
+
+function adminTimePeople() {
+  const source = timeSummary?.people?.length ? timeSummary.people : activePeople();
+  return source.filter((person) => person.login && person.active !== false);
+}
+
+function latestAdminTimeEntry(person) {
+  const entries = Array.isArray(person?.dayLog) ? person.dayLog : [];
+  return entries.find((entry) => entry.status === "W toku") || entries.at(-1) || null;
+}
+
+function adminTimeEntryDate(entry) {
+  return dateInputFromIso(entry?.startedAt) || formatDateInput(new Date());
+}
+
+function adminTimeEntrySummary(person) {
+  const entry = latestAdminTimeEntry(person);
+  if (!entry) {
+    const todaySeconds = Number(person?.todaySeconds || 0);
+    return todaySeconds ? `Dzisiaj: ${formatWorkDuration(todaySeconds)}` : "Brak wpisu dzisiaj";
+  }
+  const end = entry.end ? ` - ${entry.end}` : " - w toku";
+  const breakLabel = Number(entry.breakSeconds || 0) ? ` · przerwa ${formatWorkDuration(entry.breakSeconds)}` : "";
+  return `${entry.start || "--:--"}${end} · ${formatWorkDuration(entry.durationSeconds || 0)}${breakLabel}`;
+}
+
+function renderAdminTimeControl() {
+  const list = $("#adminTimeEntries");
+  if (!list) return;
+  if (role !== "admin") {
+    list.innerHTML = "";
+    return;
+  }
+  const peopleList = adminTimePeople();
+  list.innerHTML = peopleList.length
+    ? peopleList
+        .map((person) => {
+          const entry = latestAdminTimeEntry(person);
+          const active = ["work", "break"].includes(person.state);
+          const statusClass = active ? "green" : Number(person.todaySeconds || 0) ? "teal" : "";
+          return `
+            <article class="admin-time-entry-card">
+              <span class="avatar team-avatar-${escapeHtml(slugifyLogin(person.login || person.name))}">${escapeHtml(
+                getInitialsByLogin(person.login, person.name),
+              )}</span>
+              <div>
+                <strong>${escapeHtml(person.name)}</strong>
+                <small>${escapeHtml(adminTimeEntrySummary(person))}</small>
+              </div>
+              <span class="pill ${statusClass}">${escapeHtml(person.status || "Niewbity")}</span>
+              <button class="secondary-button" data-admin-time-edit-person="${escapeHtml(person.login)}" type="button">${
+                entry ? "Edytuj" : "Dodaj"
+              }</button>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Brak aktywnych pracowników do edycji czasu.</div>`;
+}
+
+function populateAdminTimeUserOptions(selectedLogin = "") {
+  const select = $("#adminTimeUserSelect");
+  if (!select) return "";
+  const peopleList = adminTimePeople();
+  const preferred = normalizeLogin(selectedLogin || peopleList.find((person) => person.login !== getActiveLogin())?.login || peopleList[0]?.login || "");
+  select.innerHTML = peopleList
+    .map(
+      (person) => `
+        <option value="${escapeHtml(person.login)}" ${normalizeLogin(person.login) === preferred ? "selected" : ""}>
+          ${escapeHtml(person.name)}
+        </option>
+      `,
+    )
+    .join("");
+  return select.value || preferred;
+}
+
+function fillAdminTimeFormFromPerson(login, options = {}) {
+  const selectedLogin = normalizeLogin(login || $("#adminTimeUserSelect")?.value);
+  const person = getPersonByLogin(selectedLogin);
+  const entry = latestAdminTimeEntry(person);
+  const today = formatDateInput(new Date());
+  const dateValue = options.keepDate ? $("#adminTimeDateInput")?.value || today : adminTimeEntryDate(entry);
+  const isEntryDate = entry && adminTimeEntryDate(entry) === dateValue;
+  $("#adminTimeDateInput").value = dateValue;
+  $("#adminTimeSessionInput").value = isEntryDate ? entry?.id || "" : "";
+  $("#adminTimeStartInput").value = isEntryDate ? entry?.start || timeInputFromIso(entry?.startedAt) || "08:00" : "08:00";
+  $("#adminTimeEndInput").value = isEntryDate ? entry?.end || timeInputFromIso(entry?.endedAt) || "" : "";
+  $("#adminTimeBreakInput").value = isEntryDate ? Math.round(Number(entry?.breakSeconds || 0) / 60) : 0;
+  const context = $("#adminTimeEditContext");
+  if (context) context.textContent = person?.name ? `Ewidencja czasu · ${person.name}` : "Ewidencja czasu";
+}
+
+function openAdminTimeEdit(login = "", options = {}) {
+  if (role !== "admin") return;
+  const selectedLogin = populateAdminTimeUserOptions(login);
+  activeAdminTimeEdit = { userLogin: selectedLogin };
+  if (options.blank) {
+    $("#adminTimeDateInput").value = formatDateInput(new Date());
+    $("#adminTimeSessionInput").value = "";
+    $("#adminTimeStartInput").value = "08:00";
+    $("#adminTimeEndInput").value = "";
+    $("#adminTimeBreakInput").value = 0;
+    const person = getPersonByLogin(selectedLogin);
+    const context = $("#adminTimeEditContext");
+    if (context) context.textContent = person?.name ? `Nowy wpis · ${person.name}` : "Nowy wpis";
+  } else {
+    fillAdminTimeFormFromPerson(selectedLogin);
+  }
+  openDialog("#adminTimeEditDialog");
+  window.setTimeout(() => $("#adminTimeStartInput")?.focus(), 0);
+}
+
+function refreshAdminTimeFormForDate() {
+  const login = normalizeLogin($("#adminTimeUserSelect")?.value || activeAdminTimeEdit?.userLogin || "");
+  const person = getPersonByLogin(login);
+  const entry = latestAdminTimeEntry(person);
+  const selectedDate = $("#adminTimeDateInput")?.value || formatDateInput(new Date());
+  const entryDate = adminTimeEntryDate(entry);
+  if (entry && selectedDate === entryDate) {
+    $("#adminTimeSessionInput").value = entry.id || "";
+    $("#adminTimeStartInput").value = entry.start || timeInputFromIso(entry.startedAt) || $("#adminTimeStartInput").value || "08:00";
+    $("#adminTimeEndInput").value = entry.end || timeInputFromIso(entry.endedAt) || "";
+    $("#adminTimeBreakInput").value = Math.round(Number(entry.breakSeconds || 0) / 60);
+    return;
+  }
+  $("#adminTimeSessionInput").value = "";
+}
+
+async function saveAdminTimeEdit(event) {
+  event.preventDefault();
+  if (role !== "admin") return;
+  const userLogin = normalizeLogin($("#adminTimeUserSelect")?.value || "");
+  const date = $("#adminTimeDateInput")?.value || "";
+  const startTime = $("#adminTimeStartInput")?.value || "";
+  const endTime = $("#adminTimeEndInput")?.value || "";
+  const breakMinutes = Math.max(0, Number($("#adminTimeBreakInput")?.value || 0) || 0);
+  const startMinutes = timeToMinutes(startTime);
+  const endMinutes = endTime ? timeToMinutes(endTime) : null;
+  if (!userLogin) {
+    showToast("Wybierz pracownika", "Nie ma użytkownika do edycji.");
+    return;
+  }
+  if (!date || startMinutes === null) {
+    showToast("Uzupełnij wpis", "Wybierz datę i godzinę wbicia.");
+    return;
+  }
+  if (endTime && (endMinutes === null || endMinutes <= startMinutes)) {
+    showToast("Popraw godziny", "Wybicie musi być późniejsze niż wbicie.");
+    return;
+  }
+  try {
+    const result = await apiRequest("/time/admin-entry", {
+      method: "PATCH",
+      body: JSON.stringify({
+        userLogin,
+        date,
+        startTime,
+        endTime,
+        breakMinutes,
+        sessionId: $("#adminTimeSessionInput")?.value || "",
+      }),
+    });
+    applyTimeSummary(result);
+    $("#adminTimeEditDialog")?.close();
+    showToast("Czas zapisany", `${getDisplayNameByLogin(userLogin)} · ${startTime}${endTime ? `-${endTime}` : " · wbity"}`);
+  } catch (error) {
+    showToast("Nie zapisano czasu", error.message || "Backend odrzucił ręczną edycję.");
+    await syncTimeSummaryFromBackend({ silent: true });
+  }
 }
 
 async function apiRequest(path, options = {}) {
@@ -1231,6 +1417,7 @@ function renderTimeDashboard() {
   renderTimeKpiTiles();
   renderTimeWeekChart();
   renderTimeDayLog();
+  renderAdminTimeControl();
 
   const working = $("#timeWorkingCount");
   const breakCount = $("#timeBreakCount");
@@ -1265,24 +1452,6 @@ function wageMonthStorageKey(login = selectedWageLogin) {
   return `${safeLogin}:${month}`;
 }
 
-function getSaturdayWageEntry(login = selectedWageLogin) {
-  const key = wageMonthStorageKey(login);
-  const entry = wageSaturdayEntries[key];
-  return entry && typeof entry === "object" ? entry : { seconds: 0, rate: null };
-}
-
-function saveSaturdayWageEntry(login, updates) {
-  const key = wageMonthStorageKey(login);
-  const previous = getSaturdayWageEntry(login);
-  const next = {
-    seconds: Math.max(0, Number(updates.seconds ?? previous.seconds) || 0),
-    rate: updates.rate === null || updates.rate === "" ? null : Math.max(0, Number(updates.rate ?? previous.rate) || 0),
-  };
-  wageSaturdayEntries[key] = next;
-  writeStorage(storageKeys.wageSaturday, wageSaturdayEntries);
-  return next;
-}
-
 function decimalHoursToSeconds(value) {
   return Math.max(0, Number(String(value || "").replace(",", ".")) || 0) * 3600;
 }
@@ -1292,11 +1461,154 @@ function hoursInputValueFromSeconds(seconds = 0) {
   return hours ? String(Number(hours.toFixed(2))) : "";
 }
 
+function defaultSaturdayDateInput() {
+  const today = new Date();
+  const daysUntilSaturday = (6 - today.getDay() + 7) % 7;
+  return formatDateInput(addDays(today, daysUntilSaturday));
+}
+
+function normalizeSaturdayWageEntry(entry = {}, index = 0, login = selectedWageLogin) {
+  const source = entry && typeof entry === "object" ? entry : {};
+  const storageKey = wageMonthStorageKey(login).replace(/[^a-z0-9-]/gi, "-");
+  const parsedDate = localDateFromInput(source.date);
+  const rawRate = source.rate;
+  const rawMultiplier = Number(source.multiplier);
+  return {
+    id: String(source.id || `saturday-${storageKey}-${index}`),
+    date: parsedDate ? formatDateInput(parsedDate) : defaultSaturdayDateInput(),
+    seconds: Math.max(0, Number(source.seconds) || 0),
+    rate: rawRate === null || rawRate === undefined || rawRate === "" ? null : Math.max(0, Number(rawRate) || 0),
+    multiplier: rawMultiplier > 0 ? rawMultiplier : 1,
+    note: String(source.note || "").slice(0, 80),
+  };
+}
+
+function getSaturdayWageEntries(login = selectedWageLogin) {
+  const key = wageMonthStorageKey(login);
+  const stored = wageSaturdayEntries[key];
+  let entries = [];
+  if (Array.isArray(stored)) {
+    entries = stored;
+  } else if (stored && Array.isArray(stored.entries)) {
+    entries = stored.entries;
+  } else if (stored && typeof stored === "object" && (Number(stored.seconds) || stored.rate !== undefined)) {
+    entries = [stored];
+  }
+  return entries.map((entry, index) => normalizeSaturdayWageEntry(entry, index, login)).filter((entry) => entry.seconds > 0);
+}
+
+function saveSaturdayWageEntries(login, entries) {
+  const key = wageMonthStorageKey(login);
+  const normalized = entries.map((entry, index) => normalizeSaturdayWageEntry(entry, index, login)).filter((entry) => entry.seconds > 0);
+  wageSaturdayEntries[key] = { entries: normalized };
+  writeStorage(storageKeys.wageSaturday, wageSaturdayEntries);
+  return normalized;
+}
+
+function effectiveSaturdayRate(entry, baseRate = 0) {
+  if (entry.rate !== null && entry.rate !== undefined) return Math.max(0, Number(entry.rate) || 0);
+  return Math.max(0, Number(baseRate) || 0) * (Math.max(0, Number(entry.multiplier) || 1) || 1);
+}
+
+function summarizeSaturdayWage(login = selectedWageLogin, baseRate = 0) {
+  const entries = getSaturdayWageEntries(login);
+  return entries.reduce(
+    (summary, entry) => {
+      const seconds = Math.max(0, Number(entry.seconds) || 0);
+      const pay = (seconds / 3600) * effectiveSaturdayRate(entry, baseRate);
+      summary.seconds += seconds;
+      summary.pay += pay;
+      return summary;
+    },
+    { entries, seconds: 0, pay: 0 },
+  );
+}
+
+function formatSaturdayEntryDate(value) {
+  const date = localDateFromInput(value);
+  if (!date) return "Sobota";
+  return new Intl.DateTimeFormat("pl-PL", { weekday: "short", day: "2-digit", month: "short" }).format(date);
+}
+
+function renderSaturdayWageList(summary, baseRate = 0) {
+  const list = $("#wageSaturdayEntriesList");
+  if (!list) return;
+  const entries = [...summary.entries].sort((first, second) => String(second.date).localeCompare(String(first.date)));
+  if (!entries.length) {
+    list.innerHTML = '<div class="saturday-wage-empty">Brak wpisów sobotnich w bieżącym miesiącu.</div>';
+    return;
+  }
+  list.innerHTML = entries
+    .map((entry) => {
+      const effectiveRate = effectiveSaturdayRate(entry, baseRate);
+      const pay = (entry.seconds / 3600) * effectiveRate;
+      const rateLabel =
+        entry.rate === null || entry.rate === undefined
+          ? entry.multiplier > 1
+            ? `${entry.multiplier}x podstawowa`
+            : "Stawka podstawowa"
+          : formatHourlyRate(entry.rate);
+      const note = entry.note ? `<small>${escapeHtml(entry.note)}</small>` : "";
+      return `
+        <div class="saturday-wage-entry">
+          <time>${escapeHtml(formatSaturdayEntryDate(entry.date))}</time>
+          <div>
+            <strong>${escapeHtml(formatWorkDuration(entry.seconds))}</strong>
+            <span>${escapeHtml(rateLabel)} · ${escapeHtml(formatMoney(pay))}</span>
+            ${note}
+          </div>
+          <button class="secondary-button icon-button" type="button" title="Usuń wpis" data-delete-saturday-wage="${escapeHtml(entry.id)}">×</button>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function addSaturdayWageEntry(event) {
+  event.preventDefault();
+  const login = selectedWageLogin || getActiveLogin();
+  const dateInput = $("#wageSaturdayDateInput");
+  const hoursInput = $("#wageSaturdayHoursInput");
+  const rateInput = $("#wageSaturdayRateInput");
+  const noteInput = $("#wageSaturdayNoteInput");
+  const seconds = decimalHoursToSeconds(hoursInput?.value);
+  if (!seconds) {
+    showToast("Czas pracy w sobotę", "Wpisz liczbę godzin sobotnich.");
+    hoursInput?.focus();
+    return;
+  }
+  const rawRate = String(rateInput?.value || "").trim();
+  const entry = {
+    id: `saturday-${Date.now()}`,
+    date: localDateFromInput(dateInput?.value) ? dateInput.value : defaultSaturdayDateInput(),
+    seconds,
+    rate: rawRate ? Math.max(0, Number(rawRate.replace(",", ".")) || 0) : null,
+    multiplier: 1,
+    note: String(noteInput?.value || "").trim(),
+  };
+  saveSaturdayWageEntries(login, [entry, ...getSaturdayWageEntries(login)]);
+  if (hoursInput) hoursInput.value = "";
+  if (rateInput) rateInput.value = "";
+  if (noteInput) noteInput.value = "";
+  if (dateInput) dateInput.value = defaultSaturdayDateInput();
+  showToast("Dodano sobotę", "Wpis trafił do kalkulatora stawki.");
+  renderWageCalculator();
+}
+
+function removeSaturdayWageEntry(entryId) {
+  const login = selectedWageLogin || getActiveLogin();
+  const nextEntries = getSaturdayWageEntries(login).filter((entry) => entry.id !== entryId);
+  saveSaturdayWageEntries(login, nextEntries);
+  showToast("Usunięto sobotę", "Podsumowanie wynagrodzenia zostało przeliczone.");
+  renderWageCalculator();
+}
+
 function renderWageCalculator() {
   const select = $("#wageUserSelect");
   const rateInput = $("#wageRateInput");
   const saturdayHoursInput = $("#wageSaturdayHoursInput");
   const saturdayRateInput = $("#wageSaturdayRateInput");
+  const saturdayDateInput = $("#wageSaturdayDateInput");
   if (!select || !rateInput) return;
   const wagePeople = getWagePeople();
   const fallbackLogin = role === "admin" ? wagePeople[0]?.login : getActiveLogin();
@@ -1317,24 +1629,31 @@ function renderWageCalculator() {
   const scheduledMonthSeconds = Number(person.scheduledMonthSeconds ?? timeSummary?.personal?.scheduledMonthSeconds ?? 0);
   const trackedMonthSeconds = Number(person.monthSeconds ?? timeSummary?.personal?.monthSeconds ?? 0);
   const monthSeconds = Math.max(scheduledMonthSeconds, trackedMonthSeconds);
-  const saturdayEntry = getSaturdayWageEntry(selectedWageLogin);
-  const saturdayRate = saturdayEntry.rate === null || saturdayEntry.rate === undefined ? rate : Math.max(0, Number(saturdayEntry.rate) || 0);
+  const saturdaySummary = summarizeSaturdayWage(selectedWageLogin, rate);
+  const saturdayAverageRate = saturdaySummary.seconds ? saturdaySummary.pay / (saturdaySummary.seconds / 3600) : 0;
   const basePay = (monthSeconds / 3600) * rate;
-  const saturdayPay = (Number(saturdayEntry.seconds || 0) / 3600) * saturdayRate;
   $("#wageMonthHours").textContent = formatWorkDuration(monthSeconds);
   $("#wageRateDisplay").textContent = formatHourlyRate(rate);
-  $("#wageSaturdayPayDisplay").textContent = formatMoney(saturdayPay);
-  $("#wageTotalDisplay").textContent = formatMoney(basePay + saturdayPay);
-  $("#wageSaturdayHoursBadge").textContent = formatWorkDuration(saturdayEntry.seconds || 0);
-  if (saturdayHoursInput && document.activeElement !== saturdayHoursInput) {
-    saturdayHoursInput.value = hoursInputValueFromSeconds(saturdayEntry.seconds || 0);
-  }
-  if (saturdayRateInput && document.activeElement !== saturdayRateInput) {
-    saturdayRateInput.value = saturdayEntry.rate === null || saturdayEntry.rate === undefined ? "" : String(Number(saturdayEntry.rate).toFixed(2));
+  $("#wageSaturdayPayDisplay").textContent = formatMoney(saturdaySummary.pay);
+  $("#wageTotalDisplay").textContent = formatMoney(basePay + saturdaySummary.pay);
+  const saturdayHoursBadge = $("#wageSaturdayHoursBadge");
+  if (saturdayHoursBadge) saturdayHoursBadge.textContent = formatWorkDuration(saturdaySummary.seconds);
+  const saturdayPanelPay = $("#wageSaturdayPanelPay");
+  const saturdayEntriesCount = $("#wageSaturdayEntriesCount");
+  const saturdayAverageRateNode = $("#wageSaturdayAverageRate");
+  if (saturdayPanelPay) saturdayPanelPay.textContent = formatMoney(saturdaySummary.pay);
+  if (saturdayEntriesCount) saturdayEntriesCount.textContent = String(saturdaySummary.entries.length);
+  if (saturdayAverageRateNode) saturdayAverageRateNode.textContent = formatHourlyRate(saturdayAverageRate);
+  if (saturdayDateInput && !saturdayDateInput.value && document.activeElement !== saturdayDateInput) {
+    saturdayDateInput.value = defaultSaturdayDateInput();
   }
   if (saturdayRateInput) {
-    saturdayRateInput.placeholder = rate ? `Domyślnie ${rate.toFixed(2)}` : "Jak podstawowa";
+    saturdayRateInput.placeholder = rate ? `Podstawowa ${rate.toFixed(2)}` : "Jak podstawowa";
   }
+  if (saturdayHoursInput && document.activeElement !== saturdayHoursInput && Number(saturdayHoursInput.value) < 0) {
+    saturdayHoursInput.value = "";
+  }
+  renderSaturdayWageList(saturdaySummary, rate);
   const monthLabel = $("#wageMonthLabel");
   if (monthLabel) {
     monthLabel.textContent = new Intl.DateTimeFormat("pl-PL", { month: "long", year: "numeric" }).format(new Date());
@@ -2284,6 +2603,210 @@ function renderInventoryState() {
   renderNotifications();
 }
 
+function makeStoreShortageId() {
+  return `store-shortage-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function storeShortageStatus(status) {
+  if (status === "ordered") {
+    return { id: "ordered", label: "Zamówione", className: "is-ordered", dotClass: "amber" };
+  }
+  if (status === "delivered") {
+    return { id: "delivered", label: "Uzupełnione", className: "is-delivered", dotClass: "green" };
+  }
+  return { id: "todo", label: "Do zamówienia", className: "is-todo", dotClass: "red" };
+}
+
+function storeShortagePriority(priority) {
+  if (priority === "urgent") return { id: "urgent", label: "Pilne", className: "urgent" };
+  if (priority === "normal") return { id: "normal", label: "Zwykłe", className: "normal" };
+  return { id: "important", label: "Ważne", className: "important" };
+}
+
+function normalizeStoreShortage(item) {
+  if (!item || typeof item !== "object") return null;
+  const name = String(item.name || item.title || "").trim();
+  if (!name) return null;
+  return {
+    id: String(item.id || makeStoreShortageId()),
+    name,
+    quantity: String(item.quantity || item.amount || "").trim(),
+    source: String(item.source || item.vendor || "").trim(),
+    note: String(item.note || "").trim(),
+    priority: storeShortagePriority(item.priority).id,
+    status: storeShortageStatus(item.status).id,
+    owner: String(item.owner || item.ownerName || item.owner_name || "").trim() || getActiveName(),
+    ownerLogin: normalizeLogin(item.ownerLogin || item.owner_login || getActiveLogin()),
+    orderedBy: String(item.orderedBy || item.ordered_by || "").trim(),
+    deliveredBy: String(item.deliveredBy || item.delivered_by || "").trim(),
+    createdAt: item.createdAt || item.created_at || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.updated_at || item.createdAt || item.created_at || new Date().toISOString(),
+  };
+}
+
+function saveStoreShortageState() {
+  storeShortages = storeShortages.map(normalizeStoreShortage).filter(Boolean);
+  if (backendAvailable) return;
+  writeStorage(storageKeys.storeShortages, storeShortages);
+}
+
+function storeShortageSignature(value = storeShortages) {
+  return JSON.stringify(
+    value.map((item) => [
+      item.id,
+      item.name,
+      item.quantity,
+      item.source,
+      item.note,
+      item.priority,
+      item.status,
+      item.ownerLogin,
+      item.orderedBy,
+      item.deliveredBy,
+      item.updatedAt,
+    ]),
+  );
+}
+
+function applyStoreShortageSnapshot(snapshot) {
+  if (!Array.isArray(snapshot?.items)) return false;
+  storeShortages = snapshot.items.map(normalizeStoreShortage).filter(Boolean);
+  saveStoreShortageState();
+  return true;
+}
+
+function storeShortageMatchesFilter(item) {
+  return currentStoreShortageFilter === "all" || item.status === currentStoreShortageFilter;
+}
+
+function storeShortageActions(item) {
+  if (item.status === "delivered") {
+    return `<button class="secondary-button" data-store-shortage-status="${escapeHtml(item.id)}" data-status="ordered" type="button">Cofnij</button>`;
+  }
+  const orderedButton =
+    item.status === "ordered"
+      ? `<button class="secondary-button" data-store-shortage-status="${escapeHtml(item.id)}" data-status="todo" type="button">Cofnij</button>`
+      : `<button class="secondary-button" data-store-shortage-status="${escapeHtml(item.id)}" data-status="ordered" type="button">✓ Zamówione</button>`;
+  return `
+    ${orderedButton}
+    <button class="secondary-button" data-store-shortage-status="${escapeHtml(item.id)}" data-status="delivered" type="button">✓✓ Uzupełnione</button>
+  `;
+}
+
+function renderStoreShortages() {
+  storeShortages = storeShortages.map(normalizeStoreShortage).filter(Boolean);
+  const list = $("#storeShortagesList");
+  const summary = $("#storeShortagesSummary");
+  if (!list || !summary) return;
+  $$("[data-store-shortage-filter]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.storeShortageFilter === currentStoreShortageFilter);
+  });
+  const counts = {
+    todo: storeShortages.filter((item) => item.status === "todo").length,
+    ordered: storeShortages.filter((item) => item.status === "ordered").length,
+    delivered: storeShortages.filter((item) => item.status === "delivered").length,
+  };
+  const badge = $("#storeShortagesNavBadge");
+  if (badge) {
+    badge.textContent = counts.todo;
+    badge.classList.toggle("hidden", counts.todo === 0);
+  }
+  const visibleItems = storeShortages
+    .filter(storeShortageMatchesFilter)
+    .sort((a, b) => {
+      const statusRank = { todo: 0, ordered: 1, delivered: 2 };
+      const priorityRank = { urgent: 0, important: 1, normal: 2 };
+      return (
+        statusRank[a.status] - statusRank[b.status] ||
+        priorityRank[a.priority] - priorityRank[b.priority] ||
+        String(b.updatedAt).localeCompare(String(a.updatedAt))
+      );
+    });
+  list.innerHTML = visibleItems.length
+    ? visibleItems
+        .map((item) => {
+          const status = storeShortageStatus(item.status);
+          const priority = storeShortagePriority(item.priority);
+          const timeLabel = activityTimeLabel(item.updatedAt || item.createdAt, "dziś");
+          const statusActor =
+            item.status === "delivered" && item.deliveredBy
+              ? ` · uzupełnił: ${escapeHtml(item.deliveredBy)}`
+              : item.status === "ordered" && item.orderedBy
+                ? ` · zamówił: ${escapeHtml(item.orderedBy)}`
+                : "";
+          return `
+            <article class="store-shortage-card ${status.className}" data-store-shortage-item="${escapeHtml(item.id)}">
+              <div class="store-shortage-top">
+                <div>
+                  <h3>${escapeHtml(item.name)}</h3>
+                  <p>Ilość: <strong>${escapeHtml(item.quantity || "-")}</strong>${item.source ? ` · Skąd: <strong>${escapeHtml(item.source)}</strong>` : ""} · <span class="store-shortage-status ${status.className}">${escapeHtml(status.label)}</span></p>
+                </div>
+                <span class="store-shortage-priority ${priority.className}">${escapeHtml(priority.label)}</span>
+              </div>
+              ${item.note ? `<div class="store-shortage-note">${escapeHtml(item.note)}</div>` : ""}
+              <div class="store-shortage-footer">
+                <span>dodał: ${escapeHtml(item.owner)} · ${escapeHtml(timeLabel)}${statusActor}</span>
+                <div class="store-shortage-actions">${storeShortageActions(item)}</div>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="empty-state">Brak pozycji pasujących do wybranego filtra.</div>`;
+  summary.innerHTML = `
+    <div class="store-summary-row"><span class="summary-count red">${counts.todo}</span><div><strong>Do zamówienia</strong><small>czeka na zamówienie</small></div></div>
+    <div class="store-summary-row"><span class="summary-count amber">${counts.ordered}</span><div><strong>Zamówione</strong><small>w drodze</small></div></div>
+    <div class="store-summary-row"><span class="summary-count green">${counts.delivered}</span><div><strong>Uzupełnione</strong><small>są na sklepie</small></div></div>
+  `;
+}
+
+function renderStoreShortageState() {
+  renderStoreShortages();
+  renderNotifications();
+}
+
+function focusStoreShortage(itemId) {
+  if (!itemId) return;
+  currentStoreShortageFilter = "all";
+  renderStoreShortages();
+  window.setTimeout(() => {
+    const safeItemId = window.CSS?.escape ? CSS.escape(String(itemId)) : String(itemId).replace(/["\\]/g, "\\$&");
+    const card = document.querySelector(`[data-store-shortage-item="${safeItemId}"]`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.classList.add("is-highlighted");
+    window.setTimeout(() => card.classList.remove("is-highlighted"), 1800);
+  }, 80);
+}
+
+async function syncStoreShortagesFromBackend(options = {}) {
+  if (!backendAvailable || !isLoggedIn()) return false;
+  const previousIds = new Set(storeShortages.map((item) => String(item.id)));
+  const previousSignature = storeShortageSignature();
+  try {
+    const snapshot = await apiRequest("/store-shortages", { headers: {} });
+    applyStoreShortageSnapshot(snapshot);
+    const changed = previousSignature !== storeShortageSignature();
+    if (changed && options.notify) {
+      storeShortages
+        .filter((item) => !previousIds.has(String(item.id)))
+        .filter((item) => item.ownerLogin !== getActiveLogin())
+        .forEach((item) => {
+          pushNotification("Braki na sklepie", `Nowy brak: ${item.name}`, { view: "storeShortages", shortageId: item.id });
+        });
+    }
+    return changed;
+  } catch (error) {
+    if (!options.silent) showToast("Braki na sklepie", "Nie udało się pobrać wspólnej listy braków.");
+    return false;
+  }
+}
+
+async function pollStoreShortages() {
+  const changed = await syncStoreShortagesFromBackend({ notify: true, silent: true });
+  if (changed) renderStoreShortageState();
+}
+
 function focusInventoryItem(itemId) {
   if (!itemId) return;
   currentInventoryFilter = "all";
@@ -2394,6 +2917,97 @@ async function createInventoryItem(event) {
   showToast("Towar dodany lokalnie", payload.name);
 }
 
+async function createStoreShortage(event) {
+  event.preventDefault();
+  const form = event.target;
+  const payload = {
+    name: $("#storeShortageNameInput").value.trim(),
+    quantity: $("#storeShortageQuantityInput").value.trim(),
+    source: $("#storeShortageSourceInput").value.trim(),
+    note: $("#storeShortageNoteInput").value.trim(),
+    priority: $("#storeShortagePriorityInput").value || "important",
+  };
+  if (!payload.name || !payload.quantity) return;
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest("/store-shortages", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      applyStoreShortageSnapshot(result);
+      form.reset();
+      $("#storeShortagePriorityInput").value = "important";
+      currentStoreShortageFilter = "all";
+      renderStoreShortageState();
+      showToast("Brak dodany", "Pozycja jest widoczna dla zespołu.");
+      return;
+    } catch (error) {
+      showToast("Nie dodano braku", error.message || "Backend odrzucił zapis.");
+      return;
+    }
+  }
+  const item = normalizeStoreShortage({
+    id: makeStoreShortageId(),
+    ...payload,
+    status: "todo",
+    owner: getActiveName(),
+    ownerLogin: getActiveLogin(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  storeShortages.unshift(item);
+  saveStoreShortageState();
+  form.reset();
+  $("#storeShortagePriorityInput").value = "important";
+  currentStoreShortageFilter = "all";
+  renderStoreShortageState();
+  showToast("Brak dodany lokalnie", payload.name);
+}
+
+async function updateStoreShortageStatus(itemId, status) {
+  const item = storeShortages.find((entry) => String(entry.id) === String(itemId));
+  if (!item) return;
+  const nextStatus = storeShortageStatus(status).id;
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/store-shortages/${encodeURIComponent(item.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      applyStoreShortageSnapshot(result);
+      renderStoreShortageState();
+      showToast("Status zaktualizowany", `${item.name}: ${storeShortageStatus(nextStatus).label}.`);
+      return;
+    } catch (error) {
+      showToast("Nie zmieniono statusu", error.message || "Backend odrzucił zmianę.");
+      return;
+    }
+  }
+  item.status = nextStatus;
+  item.updatedAt = new Date().toISOString();
+  if (nextStatus === "ordered") item.orderedBy = getActiveName();
+  if (nextStatus === "delivered") item.deliveredBy = getActiveName();
+  saveStoreShortageState();
+  renderStoreShortageState();
+  showToast("Status zaktualizowany", `${item.name}: ${storeShortageStatus(nextStatus).label}.`);
+}
+
+async function shareStoreShortagesList() {
+  const rows = storeShortages
+    .filter((item) => item.status !== "delivered")
+    .map((item) => {
+      const status = storeShortageStatus(item.status).label;
+      return `- ${item.name} | ${item.quantity || "-"} | ${item.source || "brak źródła"} | ${status}${item.note ? ` | ${item.note}` : ""}`;
+    });
+  const text = rows.length ? `Braki na sklepie:\n${rows.join("\n")}` : "Braki na sklepie: brak otwartych pozycji.";
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Lista skopiowana", "Możesz wkleić ją w wiadomości lub zamówieniu.");
+  } catch {
+    showToast("Lista gotowa", text.slice(0, 120));
+  }
+}
+
 async function refreshSharedCompanyData(options = {}) {
   if (sharedDataPollInFlight || !backendAvailable || !isLoggedIn()) return false;
   if (document.hidden && !options.force) return false;
@@ -2407,6 +3021,7 @@ async function refreshSharedCompanyData(options = {}) {
       pollCalendar(),
       pollKnowledge(),
       pollInventory(),
+      pollStoreShortages(),
       pollQuickPolls(),
       pollKudos(),
     ]);
@@ -2510,6 +3125,8 @@ function loadStoredState() {
   wageSaturdayEntries = storedSaturdayWage && typeof storedSaturdayWage === "object" ? storedSaturdayWage : {};
   const storedInventory = readStorage(storageKeys.inventory, []);
   inventoryItems = Array.isArray(storedInventory) ? storedInventory.map(normalizeInventoryItem).filter(Boolean) : [];
+  const storedStoreShortages = readStorage(storageKeys.storeShortages, []);
+  storeShortages = Array.isArray(storedStoreShortages) ? storedStoreShortages.map(normalizeStoreShortage).filter(Boolean) : [];
   normalizeRequests();
   normalizeTasks();
   normalizeReports();
@@ -3098,6 +3715,7 @@ function refreshUserScopedUi() {
   renderCalendar();
   renderChat();
   renderInventory();
+  renderStoreShortages();
   renderKnowledge();
   renderWageCalculator();
   renderSettings();
@@ -3158,6 +3776,7 @@ async function signIn(login, password = "") {
       await syncCalendarFromBackend({ silent: true });
       await syncKnowledgeFromBackend({ silent: true });
       await syncInventoryFromBackend({ silent: true });
+      await syncStoreShortagesFromBackend({ silent: true });
       await syncQuickPollsFromBackend({ silent: true });
       await syncKudosFromBackend({ silent: true });
       await syncChatGroupsFromBackend({ silent: true });
@@ -3267,7 +3886,14 @@ function currentElapsed() {
 }
 
 function displayedTodayMs() {
-  return Math.max(backendTodayMs(), currentElapsed());
+  if (clockedIn && !breakActive && startedAt) return Math.max(0, currentElapsed());
+  return backendTodayMs();
+}
+
+function setLocalTodaySeconds(seconds) {
+  if (!timeSummary || typeof timeSummary !== "object") return;
+  if (!timeSummary.personal || typeof timeSummary.personal !== "object") timeSummary.personal = {};
+  timeSummary.personal.todaySeconds = Math.max(0, Math.floor(Number(seconds) || 0));
 }
 
 function updateClockTicking() {
@@ -3428,6 +4054,7 @@ async function toggleClock() {
     setCurrentPersonPresence("work");
   } else {
     elapsedBefore = displayedTodayMs();
+    setLocalTodaySeconds(elapsedBefore / 1000);
     clockedIn = false;
     breakActive = false;
     startedAt = null;
@@ -3443,6 +4070,7 @@ async function toggleBreak() {
   if (!clockedIn) return;
   if (!breakActive) {
     elapsedBefore = displayedTodayMs();
+    setLocalTodaySeconds(elapsedBefore / 1000);
     breakActive = true;
     startedAt = null;
   } else {
@@ -3573,18 +4201,7 @@ function renderPeople() {
     )
     .join("");
 
-  $("#recipientGrid").innerHTML = people
-    .filter((person) => person.active !== false && person.name !== getActiveName())
-    .map(
-      (person) => `
-        <label>
-          <input data-announcement-recipient type="checkbox" value="${escapeHtml(person.login)}" checked />
-          <span class="avatar">${escapeHtml(person.initials)}</span>
-          ${escapeHtml(person.name)}
-        </label>
-      `,
-    )
-    .join("");
+  renderAnnouncementRecipientOptions();
 
   renderAccountManagement();
 }
@@ -4065,20 +4682,28 @@ function feedTypeLabel(typeId) {
 }
 
 function renderFeedTypeFilterOptions(items) {
-  const select = $("#feedTypeFilter");
-  if (!select) return;
+  const container = $("#feedTypeFilter");
+  if (!container) return;
   const counts = new Map();
   items.forEach((item) => {
     counts.set(item.category, (counts.get(item.category) || 0) + 1);
   });
   if (!feedTypeFilters.some((filter) => filter.id === currentFeedTypeFilter)) currentFeedTypeFilter = "all";
-  select.innerHTML = feedTypeFilters
+  container.innerHTML = feedTypeFilters
     .map((filter) => {
       const count = filter.id === "all" ? items.length : counts.get(filter.id) || 0;
-      return `<option value="${escapeHtml(filter.id)}">${escapeHtml(filter.label)} (${count})</option>`;
+      const active = filter.id === currentFeedTypeFilter;
+      const disabled = filter.id !== "all" && count === 0;
+      return `
+        <button class="chip feed-type-chip ${active ? "active on" : ""}" data-feed-type-filter="${escapeHtml(
+          filter.id,
+        )}" type="button" aria-pressed="${active ? "true" : "false"}" ${disabled ? "disabled" : ""}>
+          <span>${escapeHtml(filter.label)}</span>
+          <small>${count}</small>
+        </button>
+      `;
     })
     .join("");
-  select.value = currentFeedTypeFilter;
 }
 
 function decorateFeedItems(items) {
@@ -4241,7 +4866,7 @@ function buildActivityFeedItems() {
       target: { view: "calendar", eventId: event.id },
       actionLabel: "Przejdź do kalendarza",
     })),
-    ...requests.map((request, index) => ({
+    ...requests.filter((request) => !["correction", "leave"].includes(request.kind)).map((request, index) => ({
       id: `request:${request.id}`,
       category: request.kind === "leave" ? "leaves" : "time",
       type: request.kind === "correction" ? "Korekta czasu" : "Wniosek",
@@ -4406,6 +5031,118 @@ function getFeedAnnouncementPost(item) {
   return getPostById(postId);
 }
 
+function getFeedCommentContext(item) {
+  if (!item) return null;
+  const post = getFeedAnnouncementPost(item);
+  if (post) {
+    return {
+      kind: "announcement",
+      entityId: post.id,
+      title: post.title,
+      comments: normalizeEntityComments(post.comments),
+      emptyText: "Brak komentarzy pod ogloszeniem.",
+      placeholder: "Dodaj komentarz do ogloszenia",
+    };
+  }
+  if (item.category === "tasks") {
+    const task = getTaskRef(item.target?.taskId)?.task;
+    if (task) {
+      return {
+        kind: "task",
+        entityId: task.id,
+        title: task.title,
+        comments: normalizeEntityComments(task.comments),
+        emptyText: "Brak komentarzy do zadania.",
+        placeholder: "Dodaj komentarz do zadania",
+      };
+    }
+  }
+  if (item.category === "reports") {
+    const report = getReportById(item.target?.reportId);
+    if (report) {
+      return {
+        kind: "report",
+        entityId: report.id,
+        title: report.title,
+        comments: normalizeEntityComments(report.comments),
+        emptyText: "Brak komentarzy do zgloszenia.",
+        placeholder: "Dodaj komentarz do zgloszenia",
+      };
+    }
+  }
+  return null;
+}
+
+function isFeedCommentsOpen(itemId) {
+  return expandedFeedCommentIds.has(String(itemId));
+}
+
+function renderFeedInlineComments(item) {
+  if (!isFeedCommentsOpen(item.id)) return "";
+  const context = getFeedCommentContext(item);
+  if (!context) return "";
+  return `
+    <section class="feed-inline-comments is-open" data-feed-inline-comments="${escapeHtml(item.id)}">
+      <div class="feed-inline-comments-head">
+        <h5>Komentarze</h5>
+        <span class="pill">${context.comments.length}</span>
+      </div>
+      <div class="comment-list">
+        ${renderEntityComments(context.comments, context.emptyText)}
+      </div>
+      <form class="comment-form feed-inline-comment-form" data-feed-comment-form="${escapeHtml(item.id)}">
+        <input name="body" type="text" placeholder="${escapeHtml(context.placeholder)}" autocomplete="off" required />
+        <button class="primary-button" type="submit">Dodaj</button>
+      </form>
+    </section>
+  `;
+}
+
+function toggleFeedInlineComments(itemId) {
+  const key = String(itemId || "");
+  if (!key || !getActivityFeedItemById(key)) return;
+  if (expandedFeedCommentIds.has(key)) {
+    expandedFeedCommentIds.delete(key);
+  } else {
+    expandedFeedCommentIds.add(key);
+  }
+  renderPosts(currentFeedFilter);
+  if (expandedFeedCommentIds.has(key)) {
+    window.setTimeout(() => {
+      $(`[data-feed-comment-form="${escapeSelectorValue(key)}"] input[name="body"]`)?.focus();
+    }, 40);
+  }
+}
+
+async function submitFeedInlineComment(event) {
+  event.preventDefault();
+  const form = event.target;
+  const itemId = form?.dataset.feedCommentForm;
+  const item = getActivityFeedItemById(itemId);
+  const context = getFeedCommentContext(item);
+  const input = form?.querySelector("input[name='body']");
+  const body = input?.value.trim();
+  if (!context || !body) return;
+  expandedFeedCommentIds.add(String(itemId));
+
+  let savedCommentTarget = null;
+  if (context.kind === "announcement") {
+    savedCommentTarget = await addAnnouncementCommentById(context.entityId, body, { skipNotification: true });
+  } else if (context.kind === "task") {
+    savedCommentTarget = await addTaskCommentById(context.entityId, body);
+  } else if (context.kind === "report") {
+    savedCommentTarget = await addReportCommentById(context.entityId, body);
+  }
+  if (!savedCommentTarget) return;
+
+  expandedFeedCommentIds.add(String(itemId));
+  if (input) input.value = "";
+  renderPosts(currentFeedFilter);
+  window.setTimeout(() => {
+    $(`[data-feed-comment-form="${escapeSelectorValue(itemId)}"] input[name="body"]`)?.focus();
+  }, 40);
+}
+
 function renderActivityFeedReactions(item) {
   const pinButton = `<button class="rbtn feed-pin-button" data-feed-pin="${escapeHtml(item.id)}" type="button" aria-label="${
     item.pinned ? "Odepnij wpis" : "Przypnij wpis"
@@ -4421,9 +5158,9 @@ function renderActivityFeedReactions(item) {
         "task",
         task.id,
         "rbtn feed-reaction-button",
-      )}<button class="rbtn feed-comment-count" data-task-comment="${escapeHtml(
-        task.id,
-      )}" type="button" aria-label="Dodaj komentarz do zadania">&#128172; ${commentsCount}</button>`;
+      )}<button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
+        item.id,
+      )}" type="button" aria-expanded="${isFeedCommentsOpen(item.id) ? "true" : "false"}" aria-label="Rozwin komentarze zadania">&#128172; ${commentsCount}</button>`;
     }
     if (report) {
       const commentsCount = normalizeEntityComments(report.comments).length;
@@ -4432,8 +5169,8 @@ function renderActivityFeedReactions(item) {
         "report",
         report.id,
         "rbtn feed-reaction-button",
-      )}<button class="rbtn feed-comment-count" data-report-comment="${escapeHtml(
-        report.id,
+      )}<button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
+        item.id,
       )}" type="button" aria-label="Dodaj komentarz do zgłoszenia">&#128172; ${commentsCount}</button>`;
     }
     return `${pinButton}<button class="rbtn feed-comment-count" data-feed-detail="${escapeHtml(
@@ -4457,8 +5194,8 @@ function renderActivityFeedReactions(item) {
     })
     .join("");
   const commentsCount = post.comments?.length || 0;
-  return `${pinButton}${reactionButtons}<button class="rbtn feed-comment-count" data-feed-comment="${escapeHtml(
-    post.id,
+  return `${pinButton}${reactionButtons}<button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
+    item.id,
   )}" type="button" aria-label="Dodaj komentarz">&#128172; ${commentsCount}</button>`;
 }
 
@@ -4525,12 +5262,13 @@ function renderActivityFeedItem(item) {
           <button class="mini" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
         </div>
       </div>
+      ${renderFeedInlineComments(item)}
     </article>
   `;
 }
 
 function getActivityFeedItemById(itemId) {
-  return buildActivityFeedItems().find((entry) => entry.id === itemId);
+  return buildActivityFeedItems().find((entry) => String(entry.id) === String(itemId));
 }
 
 function openFeedItemDetails(itemId) {
@@ -5020,6 +5758,36 @@ async function toggleTaskReaction(taskId, reactionId) {
   saveTaskState();
   renderTaskState();
   showToast("Reakcja zapisana", ref.task.title);
+}
+
+async function addTaskCommentById(taskId, body) {
+  const ref = getTaskRef(taskId);
+  if (!ref || !body) return null;
+  activeTaskId = ref.task.id;
+
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/tasks/${encodeURIComponent(ref.task.id)}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+      applyTaskSnapshot(result);
+      renderTaskState();
+      showToast("Komentarz dodany", "Jest zapisany przy zadaniu.");
+      return getTaskRef(ref.task.id)?.task || null;
+    } catch (error) {
+      showToast("Nie dodano komentarza", error.message || "Backend odrzucil zapis.");
+      return null;
+    }
+  }
+
+  ref.task.comments = normalizeEntityComments(ref.task.comments);
+  ref.task.comments.push(makeEntityComment(body));
+  ref.task.updatedAt = "teraz";
+  saveTaskState();
+  renderTaskState();
+  showToast("Komentarz dodany", "Widac go w szczegolach zadania.");
+  return ref.task;
 }
 
 async function createTaskComment(event) {
@@ -5712,7 +6480,7 @@ function getUnifiedCalendarItems() {
         createdAt: item.updatedAt || item.createdAt,
       }),
     ),
-    ...requests.map((request) =>
+    ...requests.filter((request) => request.kind !== "correction").map((request) =>
       makeUnifiedCalendarItem({
         source: request.kind === "leave" ? "leaves" : "time",
         id: `request:${request.id}`,
@@ -5950,6 +6718,142 @@ function correctionRequests() {
   return requests.filter((request) => request.kind === "correction");
 }
 
+function timeInputMinutes(value = "") {
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(value || "").trim());
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function formatTimeInputFromDate(date = new Date()) {
+  const roundedMinutes = Math.floor(date.getMinutes() / 5) * 5;
+  return `${String(date.getHours()).padStart(2, "0")}:${String(roundedMinutes).padStart(2, "0")}`;
+}
+
+function correctionDurationMinutes(start = "", end = "") {
+  const startMinutes = timeInputMinutes(start);
+  const endMinutes = timeInputMinutes(end);
+  if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) return 0;
+  return endMinutes - startMinutes;
+}
+
+function parseCorrectionDetail(detail = "") {
+  const text = String(detail || "");
+  const dateMatch = /(\d{4}-\d{2}-\d{2})/.exec(text);
+  const timeMatch = /([01]?\d|2[0-3]):([0-5]\d)\s*[-–—]\s*([01]?\d|2[0-3]):([0-5]\d)/.exec(text);
+  const breakMatch = /Przerwa\s+(\d{1,4})\s*min/i.exec(text);
+  const reasonMatch = /Powód:\s*(.+)$/i.exec(text);
+  return {
+    date: dateMatch?.[1] || "",
+    start: timeMatch ? `${String(Number(timeMatch[1])).padStart(2, "0")}:${timeMatch[2]}` : "",
+    end: timeMatch ? `${String(Number(timeMatch[3])).padStart(2, "0")}:${timeMatch[4]}` : "",
+    breakMinutes: breakMatch ? Number(breakMatch[1]) || 0 : 0,
+    reason: reasonMatch?.[1]?.trim() || "",
+    raw: text,
+  };
+}
+
+function correctionDetailText({ date, start, end, breakMinutes, reason }) {
+  const safeBreak = Math.max(0, Number(breakMinutes) || 0);
+  const safeReason = String(reason || "").trim();
+  return `Korekta czasu · ${date} · ${start}-${end} · Przerwa ${safeBreak} min${safeReason ? ` · Powód: ${safeReason}` : ""}`;
+}
+
+function correctionSummaryHtml(request) {
+  const detail = parseCorrectionDetail(request.detail);
+  if (!detail.date || !detail.start || !detail.end) {
+    return `<span class="muted">${escapeHtml(request.detail)}</span>`;
+  }
+  const breakLabel = detail.breakMinutes ? `${detail.breakMinutes} min` : "brak";
+  return `
+    <div class="correction-summary">
+      <div><span>Data</span><strong>${escapeHtml(formatScheduleDate(detail.date))}</strong></div>
+      <div><span>Godziny</span><strong>${escapeHtml(`${detail.start}-${detail.end}`)}</strong></div>
+      <div><span>Przerwa</span><strong>${escapeHtml(breakLabel)}</strong></div>
+      <div><span>Pracownik</span><strong>${escapeHtml(request.owner || getDisplayNameByLogin(request.ownerLogin) || "-")}</strong></div>
+    </div>
+    ${detail.reason ? `<p class="correction-reason">${escapeHtml(detail.reason)}</p>` : ""}
+  `;
+}
+
+function openCorrectionForm() {
+  const form = $("#correctionForm");
+  if (!form) return;
+  form.reset();
+  const dateInput = $("#correctionDateInput");
+  const startInput = $("#correctionStartInput");
+  const endInput = $("#correctionEndInput");
+  const breakInput = $("#correctionBreakInput");
+  const reasonInput = $("#correctionReasonInput");
+  const latestLog = Array.isArray(timeSummary?.personal?.dayLog) ? timeSummary.personal.dayLog.at(-1) : null;
+  const now = new Date();
+  if (dateInput) dateInput.value = formatDateInput(now);
+  if (startInput) startInput.value = latestLog?.start || "08:00";
+  if (endInput) {
+    const proposedEnd = latestLog?.end || formatTimeInputFromDate(now);
+    endInput.value = correctionDurationMinutes(startInput?.value, proposedEnd) ? proposedEnd : "16:00";
+  }
+  if (breakInput) breakInput.value = String(Math.max(0, Math.floor(Number(latestLog?.breakSeconds || 0) / 60)));
+  if (reasonInput) reasonInput.value = "";
+  openDialog("#correctionFormDialog");
+  window.setTimeout(() => dateInput?.focus(), 50);
+}
+
+async function createCorrectionRequest(event) {
+  event.preventDefault();
+  const date = $("#correctionDateInput")?.value || "";
+  const start = $("#correctionStartInput")?.value || "";
+  const end = $("#correctionEndInput")?.value || "";
+  const breakMinutes = Math.max(0, Number($("#correctionBreakInput")?.value || 0) || 0);
+  const reason = $("#correctionReasonInput")?.value.trim() || "";
+  const duration = correctionDurationMinutes(start, end);
+  if (!date || !duration) {
+    showToast("Uzupełnij korektę", "Podaj datę oraz poprawny zakres godzin.");
+    return;
+  }
+  if (breakMinutes >= duration) {
+    showToast("Sprawdź przerwę", "Przerwa musi być krótsza niż cały czas pracy.");
+    return;
+  }
+  const title = `Korekta czasu: ${getActiveName()}`;
+  const detail = correctionDetailText({ date, start, end, breakMinutes, reason });
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest("/requests", {
+        method: "POST",
+        body: JSON.stringify({ kind: "correction", title, detail }),
+      });
+      applyRequestSnapshot(result);
+      renderRequestState();
+      $("#correctionFormDialog")?.close();
+      $("#correctionForm")?.reset();
+      pushNotification("Korekta czasu", "Nowa korekta czeka na decyzję.", { view: "time" });
+      showToast("Korekta wysłana", "Admin może ją zaakceptować i zapisać w czasie pracy.");
+      activateView("time");
+      return;
+    } catch (error) {
+      showToast("Nie zgłoszono korekty", error.message || "Backend odrzucił zapis.");
+      return;
+    }
+  }
+  requests.unshift({
+    id: `request-correction-${Date.now()}`,
+    title,
+    detail,
+    status: "Do sprawdzenia",
+    kind: "correction",
+    owner: getActiveName(),
+    ownerLogin: getActiveLogin(),
+    createdAt: "teraz",
+  });
+  saveRequestsState();
+  $("#correctionFormDialog")?.close();
+  $("#correctionForm")?.reset();
+  renderRequestState();
+  applyRole();
+  pushNotification("Korekta czasu", "Nowa korekta czeka na decyzję.", { view: "time" });
+  showToast("Korekta wysłana", "Trafiła do listy wniosków i korekt.");
+  activateView("time");
+}
+
 function leaveStatusClass(status = "") {
   if (status === "Zaakceptowane") return "s-ok";
   if (status === "Odrzucone") return "s-new";
@@ -6080,16 +6984,20 @@ function renderRequests() {
       ? corrections
           .map(
             (request) => `
-        <article class="request-card">
+        <article class="request-card correction-request-card ${requestNeedsDecision(request) ? "" : "resolved"}">
           <div class="card-line">
             <strong>${request.title}</strong>
             <span class="pill amber">${request.status}</span>
           </div>
-          <span class="muted">${request.detail}</span>
-          <div class="card-actions admin-widget">
-            <button class="secondary-button" data-request-action="approve" data-request-id="${escapeHtml(request.id)}" type="button">Akceptuj</button>
-            <button class="secondary-button" data-request-action="reject" data-request-id="${escapeHtml(request.id)}" type="button">Odrzuć</button>
-          </div>
+          ${correctionSummaryHtml(request)}
+          ${
+            requestNeedsDecision(request)
+              ? `<div class="card-actions admin-widget">
+                  <button class="secondary-button" data-request-action="approve" data-request-id="${escapeHtml(request.id)}" type="button">Zastosuj korektę</button>
+                  <button class="secondary-button" data-request-action="reject" data-request-id="${escapeHtml(request.id)}" type="button">Odrzuć</button>
+                </div>`
+              : ""
+          }
         </article>
       `,
           )
@@ -7114,6 +8022,7 @@ function notificationCategory(notification) {
   if (view === "announcements") return "announcements";
   if (view === "time") return "time";
   if (view === "inventory") return "inventory";
+  if (view === "storeShortages") return "storeShortages";
   if (view === "calendar") return "calendar";
   if (view === "knowledge") return "knowledge";
   if (view === "team") return "team";
@@ -7121,6 +8030,7 @@ function notificationCategory(notification) {
   const text = normalizeSearch(`${notification.title || ""} ${notification.body || ""}`);
   if (text.includes("czat") || text.includes("wiadom")) return "chat";
   if (text.includes("zadanie") || text.includes("zadania")) return "tasks";
+  if (text.includes("braki na sklepie") || text.includes("brak na sklepie")) return "storeShortages";
   if (text.includes("zglosz")) return "reports";
   if (text.includes("oglosz") || text.includes("komentarz")) return "announcements";
   if (text.includes("czas") || text.includes("wniosek") || text.includes("korekt") || text.includes("grafik")) return "time";
@@ -7323,6 +8233,10 @@ async function openNotificationSource(index) {
     renderInventoryState();
     focusInventoryItem(target.itemId);
   }
+  if (target.view === "storeShortages") {
+    renderStoreShortageState();
+    focusStoreShortage(target.shortageId);
+  }
   if (target.taskId) openTaskDetails(target.taskId);
   renderNotifications();
 }
@@ -7371,6 +8285,12 @@ async function openFeedItemSource(itemId) {
     activateView("inventory");
     renderInventoryState();
     focusInventoryItem(target.itemId);
+    return;
+  }
+  if (target.view === "storeShortages") {
+    activateView("storeShortages");
+    renderStoreShortageState();
+    focusStoreShortage(target.shortageId);
     return;
   }
   activateView(target.view || "dashboard");
@@ -8168,6 +9088,7 @@ function activateView(viewId) {
       syncCalendarFromBackend({ silent: true }),
       syncKnowledgeFromBackend({ silent: true }),
       syncInventoryFromBackend({ silent: true }),
+      syncStoreShortagesFromBackend({ silent: true }),
       syncQuickPollsFromBackend({ silent: true }),
       syncKudosFromBackend({ silent: true }),
     ]).then((changes) => {
@@ -8178,6 +9099,7 @@ function activateView(viewId) {
       renderCalendar();
       renderKnowledge();
       renderInventory();
+      renderStoreShortages();
       renderQuickPoll();
       renderKudos();
       renderPosts(currentFeedFilter);
@@ -8235,6 +9157,11 @@ function activateView(viewId) {
   if (actualViewId === "inventory" && backendAvailable && isLoggedIn()) {
     syncInventoryFromBackend({ silent: true }).then((changed) => {
       if (changed) renderInventoryState();
+    });
+  }
+  if (actualViewId === "storeShortages" && backendAvailable && isLoggedIn()) {
+    syncStoreShortagesFromBackend({ silent: true }).then((changed) => {
+      if (changed) renderStoreShortageState();
     });
   }
   if (actualViewId === "activity") {
@@ -8316,6 +9243,7 @@ function renderSearch(query) {
     ...requests.map((request) => ["Wniosek", request.title, request.detail]),
     ...kbArticles.map((article) => ["Baza wiedzy", article.title, article.detail]),
     ...inventoryItems.map((item) => ["Magazyn", item.name, `${item.sku} ${item.category} ${item.location}`]),
+    ...storeShortages.map((item) => ["Braki na sklepie", item.name, `${item.quantity} ${item.source} ${item.note}`]),
     ...handoverNotes.map((note) => ["Zeszyt zmiany", note.text, note.author]),
     ...chatItems,
   ].filter((item) => normalizeSearch(item.join(" ")).includes(normalizedQuery));
@@ -8339,6 +9267,29 @@ function submitGlobalSearch(event) {
   openSearch($("#globalSearchInput").value.trim());
 }
 
+function announcementRecipientMarkup() {
+  return people
+    .filter((person) => person.active !== false && person.name !== getActiveName())
+    .map(
+      (person) => `
+        <label>
+          <input data-announcement-recipient type="checkbox" value="${escapeHtml(person.login)}" checked />
+          <span class="avatar">${escapeHtml(person.initials)}</span>
+          ${escapeHtml(person.name)}
+        </label>
+      `,
+    )
+    .join("");
+}
+
+function renderAnnouncementRecipientOptions() {
+  const markup = announcementRecipientMarkup();
+  const recipientGrid = $("#recipientGrid");
+  if (recipientGrid) recipientGrid.innerHTML = markup;
+  const dashboardRecipientGrid = $("#dashboardRecipientGrid");
+  if (dashboardRecipientGrid) dashboardRecipientGrid.innerHTML = markup;
+}
+
 function updateAnnouncementRecipientsVisibility() {
   const audience = $("#postAudience");
   const fieldset = $(".announcement-recipient-fieldset");
@@ -8346,33 +9297,64 @@ function updateAnnouncementRecipientsVisibility() {
   fieldset.classList.toggle("hidden", audience.value !== "selected");
 }
 
-async function addQuickTaskFromContext(title = "Nowe zadanie") {
-  const createdTask = await addTaskToBoard({
-    title,
-    owner: getActiveName(),
-    ownerLogin: getActiveLogin(),
-    due: "dzi?",
-    priority: "normal",
-    description: "Zadanie dodane szybkim skr?tem do dalszego uzupe?nienia.",
-    source: "Szybkie dodanie",
-    createdAt: "teraz",
-  });
-  if (createdTask) showToast("Dodano zadanie", "Nowa karta trafi?a do kolumny Do zrobienia.");
+function updateDashboardComposerRecipientsVisibility() {
+  const audience = $("#dashboardPostAudience");
+  const fieldset = $("#dashboardRecipientFieldset");
+  if (!audience || !fieldset) return;
+  fieldset.classList.toggle("hidden", audience.value !== "selected");
 }
 
-async function createPost(event) {
-  event.preventDefault();
-  const title = $("#postTitle").value.trim();
-  const body = $("#postBody").value.trim();
-  const priority = $("#postPriority").value;
-  const audience = $("#postAudience").value;
-  const file = $("#postAttachment")?.files?.[0];
-  const recipientLogins = $$("[data-announcement-recipient]:checked").map((input) => normalizeLogin(input.value));
-  if (!title || !body) return;
+function updateDashboardAttachmentLabel() {
+  const input = $("#dashboardPostAttachment");
+  const label = $("#dashboardAttachmentName");
+  if (!input || !label) return;
+  label.textContent = input.files?.[0]?.name || "Nie wybrano pliku";
+}
+
+function openDashboardComposer() {
+  $("#dashboardComposerTrigger")?.classList.add("hidden");
+  $("#dashboardAnnouncementForm")?.classList.remove("hidden");
+  updateDashboardComposerRecipientsVisibility();
+  updateDashboardAttachmentLabel();
+  window.setTimeout(() => $("#dashboardPostTitle")?.focus(), 0);
+}
+
+function closeDashboardComposer(options = {}) {
+  const form = $("#dashboardAnnouncementForm");
+  if (form && options.reset) form.reset();
+  $("#dashboardComposerTrigger")?.classList.remove("hidden");
+  form?.classList.add("hidden");
+  updateDashboardComposerRecipientsVisibility();
+  updateDashboardAttachmentLabel();
+}
+
+async function publishAnnouncementFromForm(form, options = {}) {
+  const titleInput = form.querySelector('[name="title"]');
+  const bodyInput = form.querySelector('[name="body"]');
+  const priorityInput = form.querySelector('[name="priority"]');
+  const audienceInput = form.querySelector('[name="audience"]');
+  const attachmentInput = form.querySelector('[name="attachment"]');
+  const title = titleInput?.value.trim() || "";
+  const body = bodyInput?.value.trim() || "";
+  const priority = priorityInput?.value || "normal";
+  const audience = audienceInput?.value || "all";
+  const file = attachmentInput?.files?.[0];
+  const recipientLogins = [...form.querySelectorAll("[data-announcement-recipient]:checked")].map((input) =>
+    normalizeLogin(input.value),
+  );
+  if (!title || !body) {
+    showToast("Uzupełnij ogłoszenie", "Podaj tytuł i treść.");
+    (title ? bodyInput : titleInput)?.focus();
+    return false;
+  }
+  if (audience === "selected" && !recipientLogins.length) {
+    showToast("Wybierz odbiorców", "Dla wybranych osób zaznacz przynajmniej jednego odbiorcę.");
+    return false;
+  }
 
   if (backendAvailable) {
     try {
-      const formData = new FormData(event.target);
+      const formData = new FormData(form);
       formData.set("title", title);
       formData.set("body", body);
       formData.set("priority", priority);
@@ -8382,23 +9364,21 @@ async function createPost(event) {
       applyAnnouncementMutationResult(result, result.post?.id);
       pushNotification("Nowe ogłoszenie", title, { view: "announcements", postId: result.post?.id });
       showToast("Opublikowano ogłoszenie", "Jest zapisane w bazie i widoczne dla pozostałych użytkowników.");
-      event.target.reset();
+      form.reset();
       updateAnnouncementRecipientsVisibility();
+      updateDashboardComposerRecipientsVisibility();
+      updateDashboardAttachmentLabel();
+      if (options.closeDashboard) closeDashboardComposer({ reset: false });
       renderPeople();
-      return;
+      return true;
     } catch (error) {
       showToast("Nie opublikowano ogłoszenia", error.message || "Backend odrzucił zapis.");
-      return;
+      return false;
     }
   }
 
   const now = new Date().toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
-  const total =
-    audience === "selected"
-      ? Math.max(1, recipientLogins.length + 1)
-      : audience === "boss"
-        ? 1
-        : activePeople().length;
+  const total = audience === "selected" ? Math.max(1, recipientLogins.length + 1) : activePeople().length;
   const post = {
     id: Date.now(),
     title,
@@ -8420,8 +9400,77 @@ async function createPost(event) {
   renderPosts();
   pushNotification("Nowe ogłoszenie", post.title, { view: "announcements", postId: post.id });
   showToast("Opublikowano ogłoszenie", "Pojawiło się w strumieniu i na liście ogłoszeń.");
-  event.target.reset();
+  form.reset();
   updateAnnouncementRecipientsVisibility();
+  updateDashboardComposerRecipientsVisibility();
+  updateDashboardAttachmentLabel();
+  if (options.closeDashboard) closeDashboardComposer({ reset: false });
+  return true;
+}
+
+async function addQuickTaskFromContext(title = "Nowe zadanie") {
+  const createdTask = await addTaskToBoard({
+    title,
+    owner: getActiveName(),
+    ownerLogin: getActiveLogin(),
+    due: "dzi?",
+    priority: "normal",
+    description: "Zadanie dodane szybkim skr?tem do dalszego uzupe?nienia.",
+    source: "Szybkie dodanie",
+    createdAt: "teraz",
+  });
+  if (createdTask) showToast("Dodano zadanie", "Nowa karta trafi?a do kolumny Do zrobienia.");
+}
+
+async function createPost(event) {
+  event.preventDefault();
+  await publishAnnouncementFromForm(event.target);
+}
+
+async function createDashboardPost(event) {
+  event.preventDefault();
+  await publishAnnouncementFromForm(event.target, { closeDashboard: true });
+}
+
+async function addAnnouncementCommentById(postId, body, options = {}) {
+  const post = getPostById(postId);
+  if (!post || !body) return null;
+
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/announcements/${encodeURIComponent(post.id)}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+      const updatedPost = applyAnnouncementMutationResult(result, post.id);
+      if (!options.skipNotification) {
+        pushNotification("Nowy komentarz", `${getActiveName()} skomentowal(a): ${post.title}`, {
+          view: "announcements",
+          postId: post.id,
+        });
+      }
+      showToast("Komentarz dodany", "Jest zapisany w bazie ogloszen.");
+      return updatedPost;
+    } catch (error) {
+      showToast("Nie dodano komentarza", error.message || "Backend odrzucil zapis.");
+      return null;
+    }
+  }
+
+  post.comments = normalizeEntityComments(post.comments);
+  post.comments.push(makeEntityComment(body));
+  if (activePostId && String(activePostId) === String(post.id) && $("#postDialog")?.open) {
+    renderPostDialog(post);
+  }
+  renderPosts(currentFeedFilter);
+  if (!options.skipNotification) {
+    pushNotification("Nowy komentarz", `${getActiveName()} skomentowal(a): ${post.title}`, {
+      view: "announcements",
+      postId: post.id,
+    });
+  }
+  showToast("Komentarz dodany", "Widac go pod ogloszeniem.");
+  return post;
 }
 
 async function createPostComment(event) {
@@ -8541,6 +9590,11 @@ async function updateRequestStatus(requestId, status) {
         body: JSON.stringify({ status }),
       });
       applyRequestSnapshot(result);
+      if (result.timeSummary) {
+        applyTimeSummary(result.timeSummary);
+      } else if (request.kind === "correction" && status === "Zaakceptowane") {
+        await syncTimeSummaryFromBackend({ silent: true });
+      }
       renderRequestState();
       return requests.find((item) => String(item.id) === String(request.id)) || result.request || request;
     } catch (error) {
@@ -8647,6 +9701,36 @@ async function createReport(event) {
   renderReportState();
   pushNotification("Nowe zgłoszenie", `${category}: ${detail}`, { view: "reports" });
   showToast("Zgłoszenie wysłane", "Admin zobaczy je na liście zgłoszeń.");
+}
+
+async function addReportCommentById(reportId, body) {
+  const report = getReportById(reportId);
+  if (!report || !body) return null;
+  openReportCommentId = String(report.id);
+
+  if (backendAvailable) {
+    try {
+      const result = await apiRequest(`/reports/${encodeURIComponent(report.id)}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+      applyReportSnapshot(result);
+      renderReportState();
+      showToast("Komentarz dodany", "Jest zapisany przy zgloszeniu.");
+      return getReportById(report.id) || null;
+    } catch (error) {
+      showToast("Nie dodano komentarza", error.message || "Backend odrzucil zapis.");
+      return null;
+    }
+  }
+
+  report.comments = normalizeEntityComments(report.comments);
+  report.comments.push(makeEntityComment(body));
+  report.updatedAt = "teraz";
+  saveReportState();
+  renderReportState();
+  showToast("Komentarz dodany", "Widac go przy zgloszeniu.");
+  return report;
 }
 
 async function createReportComment(event) {
@@ -9110,6 +10194,7 @@ async function boot() {
   renderStats();
   renderChat();
   renderInventory();
+  renderStoreShortages();
   renderKnowledge();
   renderActivityLog();
   renderNotifications();
@@ -9153,12 +10238,6 @@ async function boot() {
       if (event.target.checked) saveUserPreferences({ accent: event.target.value });
     });
   });
-  $$("[data-source-theme]").forEach((button) => {
-    button.addEventListener("click", () => saveUserPreferences({ theme: button.dataset.sourceTheme }));
-  });
-  $$("[data-source-accent]").forEach((button) => {
-    button.addEventListener("click", () => saveUserPreferences({ accent: button.dataset.sourceAccent }));
-  });
   $$("[data-settings-notification]").forEach((input) => {
     input.addEventListener("change", (event) => {
       saveUserPreferences({ notifications: { [event.target.value]: event.target.checked } });
@@ -9186,6 +10265,19 @@ async function boot() {
       renderInventory();
     });
   });
+  $("#storeShortageForm")?.addEventListener("submit", createStoreShortage);
+  $("#shareStoreShortagesButton")?.addEventListener("click", shareStoreShortagesList);
+  $$("[data-store-shortage-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      currentStoreShortageFilter = button.dataset.storeShortageFilter || "all";
+      renderStoreShortages();
+    });
+  });
+  $("[data-store-shortage-focus-form]")?.addEventListener("click", () => {
+    activateView("storeShortages");
+    $("#storeShortageForm")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => $("#storeShortageNameInput")?.focus(), 180);
+  });
   $("#addKnowledgeButton").addEventListener("click", openKnowledgeForm);
   $("#addKudosButton").addEventListener("click", openKudosForm);
   $("#kudosForm").addEventListener("submit", createKudosEntry);
@@ -9194,6 +10286,14 @@ async function boot() {
   $("#announcementForm").addEventListener("submit", createPost);
   $("#postAudience").addEventListener("change", updateAnnouncementRecipientsVisibility);
   updateAnnouncementRecipientsVisibility();
+  $("#dashboardAnnouncementForm")?.addEventListener("submit", createDashboardPost);
+  $("#dashboardPostAudience")?.addEventListener("change", updateDashboardComposerRecipientsVisibility);
+  $("#dashboardPostAttachment")?.addEventListener("change", updateDashboardAttachmentLabel);
+  $("[data-dashboard-attachment-button]")?.addEventListener("click", () => $("#dashboardPostAttachment")?.click());
+  $("[data-dashboard-composer-toggle]")?.addEventListener("click", openDashboardComposer);
+  $("[data-dashboard-composer-cancel]")?.addEventListener("click", () => closeDashboardComposer({ reset: true }));
+  updateDashboardComposerRecipientsVisibility();
+  updateDashboardAttachmentLabel();
   $("#postCommentForm").addEventListener("submit", createPostComment);
   $("#leaveForm").addEventListener("submit", createLeaveRequest);
   $("#reportForm").addEventListener("submit", createReport);
@@ -9214,8 +10314,13 @@ async function boot() {
       await changeManagedAccountPassword(event);
       return;
     }
+    if (event.target.matches("[data-feed-comment-form]")) {
+      await submitFeedInlineComment(event);
+      return;
+    }
     if (event.target.matches("[data-report-comment-form]")) {
       await createReportComment(event);
+      return;
     }
   });
   $("[data-chat-attach]").addEventListener("click", () => $("#chatAttachmentInput").click());
@@ -9285,6 +10390,14 @@ async function boot() {
   $("#bulkScheduleForm").addEventListener("submit", saveBulkScheduleForm);
   $("#bulkScheduleMode").addEventListener("change", updateBulkScheduleMode);
   $("#bulkScheduleClearButton").addEventListener("click", clearBulkScheduleForm);
+  $("#adminTimeEditButton")?.addEventListener("click", () => openAdminTimeEdit());
+  $("#adminTimeNewEntryButton")?.addEventListener("click", () => openAdminTimeEdit("", { blank: true }));
+  $("#adminTimeEditForm")?.addEventListener("submit", saveAdminTimeEdit);
+  $("#adminTimeUserSelect")?.addEventListener("change", (event) => {
+    activeAdminTimeEdit = { userLogin: normalizeLogin(event.target.value) };
+    fillAdminTimeFormFromPerson(event.target.value);
+  });
+  $("#adminTimeDateInput")?.addEventListener("change", refreshAdminTimeFormForDate);
   $("#schedulePrevWeek").addEventListener("click", () => shiftScheduleWeek(-1));
   $("#scheduleNextWeek").addEventListener("click", () => shiftScheduleWeek(1));
   $("#scheduleCurrentWeek").addEventListener("click", () => setScheduleWeek(formatDateInput(getWeekStartDate())));
@@ -9309,54 +10422,15 @@ async function boot() {
     saveWageRates();
     renderWageCalculator();
   });
-  $("#wageSaturdayHoursInput")?.addEventListener("input", (event) => {
-    saveSaturdayWageEntry(selectedWageLogin || getActiveLogin(), {
-      seconds: decimalHoursToSeconds(event.target.value),
-    });
-    renderWageCalculator();
+  $("#wageSaturdayForm")?.addEventListener("submit", addSaturdayWageEntry);
+  $("#wageSaturdayRateInput")?.addEventListener("input", renderWageCalculator);
+  $("#wageSaturdayEntriesList")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-delete-saturday-wage]");
+    if (!button) return;
+    removeSaturdayWageEntry(button.dataset.deleteSaturdayWage);
   });
-  $("#wageSaturdayRateInput")?.addEventListener("input", (event) => {
-    const raw = String(event.target.value || "").trim();
-    saveSaturdayWageEntry(selectedWageLogin || getActiveLogin(), {
-      rate: raw ? Math.max(0, Number(raw.replace(",", ".")) || 0) : null,
-    });
-    renderWageCalculator();
-  });
-  $("#correctionButton").addEventListener("click", async () => {
-    const title = `Korekta czasu: ${getActiveName()}`;
-    const detail = "Dzisiaj · zapomniałem wybić się o 17:00";
-    if (backendAvailable) {
-      try {
-        const result = await apiRequest("/requests", {
-          method: "POST",
-          body: JSON.stringify({ kind: "correction", title, detail }),
-        });
-        applyRequestSnapshot(result);
-        renderRequestState();
-        pushNotification("Korekta czasu", "Nowa korekta czeka na decyzję.", { view: "time" });
-        showToast("Korekta zgłoszona", "Trafiła do wspólnej listy wniosków i korekt.");
-        activateView("time");
-        return;
-      } catch (error) {
-        showToast("Nie zgłoszono korekty", error.message || "Backend odrzucił zapis.");
-        return;
-      }
-    }
-    requests.unshift({
-      id: `request-correction-${Date.now()}`,
-      title,
-      detail,
-      status: "Do sprawdzenia",
-      kind: "correction",
-      createdAt: "teraz",
-    });
-    saveRequestsState();
-    renderRequests();
-    applyRole();
-    pushNotification("Korekta czasu", "Nowa korekta czeka na decyzję.", { view: "time" });
-    showToast("Korekta zgłoszona", "Trafiła do listy wniosków i korekt.");
-    activateView("time");
-  });
+  $("#correctionButton").addEventListener("click", openCorrectionForm);
+  $("#correctionForm")?.addEventListener("submit", createCorrectionRequest);
 
   document.addEventListener("change", async (event) => {
     const myDayCheckbox = event.target.closest("[data-myday-check]");
@@ -9445,6 +10519,12 @@ async function boot() {
       return;
     }
 
+    const adminTimeEditPersonButton = event.target.closest("[data-admin-time-edit-person]");
+    if (adminTimeEditPersonButton) {
+      openAdminTimeEdit(adminTimeEditPersonButton.dataset.adminTimeEditPerson);
+      return;
+    }
+
     const calendarSourceFilterButton = event.target.closest("[data-calendar-source-filter]");
     if (calendarSourceFilterButton) {
       toggleCalendarSourceFilter(calendarSourceFilterButton.dataset.calendarSourceFilter);
@@ -9474,6 +10554,12 @@ async function boot() {
     if (feedReadButton) {
       const post = await markPostRead(feedReadButton.dataset.feedRead);
       if (post) showToast("Odczyt potwierdzony", post.title);
+      return;
+    }
+
+    const feedInlineCommentButton = event.target.closest("[data-feed-comment-toggle]");
+    if (feedInlineCommentButton) {
+      toggleFeedInlineComments(feedInlineCommentButton.dataset.feedCommentToggle);
       return;
     }
 
@@ -9544,6 +10630,10 @@ async function boot() {
     const quickAnnouncementButton = event.target.closest("[data-quick-announcement]");
     if (quickAnnouncementButton) {
       quickAnnouncementButton.closest(".source-add-wrap")?.classList.remove("show");
+      if ($("#dashboard")?.classList.contains("active-view")) {
+        openDashboardComposer();
+        return;
+      }
       activateView("announcements");
       window.setTimeout(() => $("#postTitle")?.focus(), 0);
       showToast("Nowe ogłoszenie", "Uzupełnij ogłoszenie w formularzu.");
@@ -9590,6 +10680,15 @@ async function boot() {
     const knowledgeDetailsButton = event.target.closest("[data-kb-details]");
     if (knowledgeDetailsButton) {
       await openKnowledgeDetails(knowledgeDetailsButton.dataset.kbDetails);
+      return;
+    }
+
+    const storeShortageStatusButton = event.target.closest("[data-store-shortage-status]");
+    if (storeShortageStatusButton) {
+      await updateStoreShortageStatus(
+        storeShortageStatusButton.dataset.storeShortageStatus,
+        storeShortageStatusButton.dataset.status,
+      );
       return;
     }
 
@@ -9689,7 +10788,7 @@ async function boot() {
           pushNotification("Decyzja zapisana", `${request.title}: zaakceptowane.`, {
             view: request.kind === "leave" ? "leaves" : "time",
           });
-          showToast("Decyzja zapisana", request.title);
+          showToast(request.kind === "correction" ? "Korekta zastosowana" : "Decyzja zapisana", request.title);
         }
         return;
       }
@@ -9724,7 +10823,9 @@ async function boot() {
       if (!request) return;
       const status = requestButton.dataset.requestAction === "approve" ? "Zaakceptowane" : "Odrzucone";
       const updatedRequest = await updateRequestStatus(request.id, status);
-      if (updatedRequest) showToast("Status wniosku zmieniony", status);
+      if (updatedRequest) {
+        showToast(request.kind === "correction" && status === "Zaakceptowane" ? "Korekta zastosowana" : "Status wniosku zmieniony", status);
+      }
       return;
     }
 
@@ -9921,8 +11022,10 @@ async function boot() {
     renderPosts(event.target.dataset.feedFilter);
   });
 
-  $("#feedTypeFilter").addEventListener("change", (event) => {
-    currentFeedTypeFilter = event.target.value || "all";
+  $("#feedTypeFilter").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-feed-type-filter]");
+    if (!button || button.disabled) return;
+    currentFeedTypeFilter = button.dataset.feedTypeFilter || "all";
     renderPosts(currentFeedFilter);
   });
 

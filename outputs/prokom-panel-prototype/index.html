@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=146" />
+    <link rel="stylesheet" href="styles.css?v=157" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -92,6 +92,11 @@
           </button>
 
           <span class="nav-section nav-label" data-nav-section="company">Firma</span>
+          <button class="nav-item" data-view="storeShortages" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.5 3h2l2.4 12.2a2 2 0 0 0 2 1.6h8.7a2 2 0 0 0 1.9-1.4L21 8H6"/></svg>
+            <span>Braki na sklepie</span>
+            <strong class="badge hidden" id="storeShortagesNavBadge">0</strong>
+          </button>
           <button class="nav-item" data-view="inventory" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-6 9 6v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 21V12h6v9"/></svg>
             <span>Magazyn</span>
@@ -209,15 +214,58 @@
                 </div>
               </div>
               <div class="card-b">
+                <div class="feed-type-filter-row" id="feedTypeFilter" role="group" aria-label="Filtr typu wpisów na tablicy"></div>
                 <div class="composer" id="dashboardComposer">
-                  <button class="trigger" data-quick-announcement type="button">
+                  <button class="trigger" id="dashboardComposerTrigger" data-dashboard-composer-toggle type="button">
                     <div class="av source-composer-avatar" data-announcement-composer-avatar aria-label="Autor ogłoszenia">TA</div>
                     <div class="ph">Napisz ogłoszenie do zespołu...</div>
                   </button>
+                  <form class="dashboard-composer-form hidden" id="dashboardAnnouncementForm" enctype="multipart/form-data">
+                    <div class="dashboard-composer-top">
+                      <div class="av source-composer-avatar" data-announcement-composer-avatar aria-label="Autor ogłoszenia">TA</div>
+                      <div>
+                        <strong>Nowe ogłoszenie</strong>
+                        <span>Opublikuj wiadomość na tablicy zespołu</span>
+                      </div>
+                    </div>
+                    <label>Tytuł
+                      <input id="dashboardPostTitle" name="title" type="text" placeholder="Krótki tytuł ogłoszenia" required />
+                    </label>
+                    <label>Treść
+                      <textarea id="dashboardPostBody" name="body" rows="3" placeholder="Treść ogłoszenia..." required></textarea>
+                    </label>
+                    <div class="dashboard-composer-grid">
+                      <label>Priorytet
+                        <select id="dashboardPostPriority" name="priority">
+                          <option value="normal">Zwykłe</option>
+                          <option value="important">Ważne</option>
+                          <option value="urgent">Pilne</option>
+                        </select>
+                      </label>
+                      <label>Odbiorcy
+                        <select id="dashboardPostAudience" name="audience">
+                          <option value="all">Do wszystkich</option>
+                          <option value="selected">Wybrane osoby</option>
+                        </select>
+                      </label>
+                    </div>
+                    <fieldset class="dashboard-recipient-fieldset hidden" id="dashboardRecipientFieldset">
+                      <legend>Wybierz odbiorców</legend>
+                      <div class="recipient-grid dashboard-recipient-grid" id="dashboardRecipientGrid"></div>
+                    </fieldset>
+                    <div class="dashboard-attachment-row">
+                      <input class="hidden-file-input" id="dashboardPostAttachment" name="attachment" type="file" />
+                      <button class="secondary-button" data-dashboard-attachment-button type="button">Załącznik</button>
+                      <span id="dashboardAttachmentName">Nie wybrano pliku</span>
+                    </div>
+                    <menu class="dashboard-composer-actions">
+                      <button class="secondary-button" data-dashboard-composer-cancel type="button">Anuluj</button>
+                      <button class="primary-button" type="submit">Opublikuj</button>
+                    </menu>
+                  </form>
                 </div>
                 <div class="source-pinbar">📌 PRZYPIĘTE <span></span></div>
                 <div class="feed-list feed" id="feedList"></div>
-                <select class="source-hidden-control" id="feedTypeFilter" aria-hidden="true"></select>
               </div>
             </article>
 
@@ -412,6 +460,7 @@
                 <div>
                   <button id="timeClockButton" class="primary-button" type="button">Wbijam się</button>
                   <button id="correctionButton" class="secondary-button" type="button">Zgłoś korektę</button>
+                  <button id="adminTimeEditButton" class="secondary-button admin-only" type="button">Edytuj obecność</button>
                 </div>
               </div>
               <div class="stats-row">
@@ -449,6 +498,17 @@
               </div>
             </article>
 
+            <article class="panel admin-time-control-panel admin-widget">
+              <header class="panel-header">
+                <div>
+                  <h2>Ręczna edycja czasu</h2>
+                  <p class="muted">Dzisiejsze wpisy zespołu i szybka korekta wbicia.</p>
+                </div>
+                <button class="secondary-button" id="adminTimeNewEntryButton" type="button">Dodaj wpis</button>
+              </header>
+              <div class="admin-time-entry-list" id="adminTimeEntries"></div>
+            </article>
+
             <article class="panel wide-panel schedule-panel">
               <header class="panel-header">
                 <h2>Grafik pracy zespołu</h2>
@@ -481,29 +541,42 @@
                   <input id="wageRateInput" type="number" min="0" step="0.01" placeholder="0,00" />
                 </label>
               </div>
-              <div class="saturday-wage-section">
-                <div class="saturday-wage-head">
-                  <div>
-                    <strong>Czas pracy w sobotę</strong>
-                    <span>Dodaj godziny sobotnie do bieżącego miesiąca.</span>
-                  </div>
-                  <span class="pill amber" id="wageSaturdayHoursBadge">0h 00m</span>
-                </div>
-                <div class="form-row saturday-wage-form">
-                  <label>Godziny sobotnie
-                    <input id="wageSaturdayHoursInput" type="number" min="0" step="0.25" placeholder="Np. 8" />
-                  </label>
-                  <label>Stawka sobotnia
-                    <input id="wageSaturdayRateInput" type="number" min="0" step="0.01" placeholder="Jak podstawowa" />
-                  </label>
-                </div>
-              </div>
               <div class="stats-row wage-summary">
                 <div><span>Godziny podstawowe</span><strong id="wageMonthHours">0h 00m</strong></div>
                 <div><span>Stawka</span><strong id="wageRateDisplay">0,00 zł/h</strong></div>
                 <div><span>Soboty</span><strong id="wageSaturdayPayDisplay">0,00 zł</strong></div>
                 <div><span>Zarobek</span><strong id="wageTotalDisplay">0,00 zł</strong></div>
               </div>
+            </article>
+
+            <article class="panel saturday-wage-card">
+              <header class="panel-header">
+                <div>
+                  <h2>Czas pracy w sobotę</h2>
+                  <p class="muted">Oddzielne wpisy sobotnie dla bieżącego miesiąca.</p>
+                </div>
+              </header>
+              <form class="saturday-wage-form" id="wageSaturdayForm">
+                <label>Data
+                  <input id="wageSaturdayDateInput" type="date" />
+                </label>
+                <label>Godziny
+                  <input id="wageSaturdayHoursInput" type="number" min="0" step="0.25" placeholder="Np. 8" />
+                </label>
+                <label>Stawka
+                  <input id="wageSaturdayRateInput" type="number" min="0" step="0.01" placeholder="Jak podstawowa" />
+                </label>
+                <label class="saturday-note-field">Notatka
+                  <input id="wageSaturdayNoteInput" type="text" maxlength="80" placeholder="Np. pilna dostawa" />
+                </label>
+                <button class="primary-button" type="submit">Dodaj sobotę</button>
+              </form>
+              <div class="saturday-wage-summary">
+                <div><span>Wpisy</span><strong id="wageSaturdayEntriesCount">0</strong></div>
+                <div><span>Średnia stawka</span><strong id="wageSaturdayAverageRate">0,00 zł/h</strong></div>
+                <div><span>Kwota</span><strong id="wageSaturdayPanelPay">0,00 zł</strong></div>
+              </div>
+              <div class="saturday-wage-list" id="wageSaturdayEntriesList"></div>
             </article>
 
             <article class="panel">
@@ -778,6 +851,76 @@
                 <tbody id="stockBody"></tbody>
               </table>
             </div>
+          </div>
+        </section>
+
+        <section id="storeShortages" class="view store-shortages-view">
+          <div class="store-shortages-head">
+            <div>
+              <h2>Braki na sklepie</h2>
+              <p>Co się kończy lub trzeba dokupić, z informacją skąd zamówić i czy temat jest już domknięty.</p>
+            </div>
+            <div class="store-shortages-head-actions">
+              <button class="secondary-button" id="shareStoreShortagesButton" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.8 15.4 6.2M8.6 13.2l6.8 4.6"/></svg>
+                Udostępnij listę
+              </button>
+              <button class="primary-button" data-store-shortage-focus-form type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                Dodaj brak
+              </button>
+            </div>
+          </div>
+          <div class="store-shortages-layout">
+            <article class="panel store-shortages-list-panel">
+              <header class="panel-header">
+                <h2>Lista braków</h2>
+                <div class="segmented store-shortages-filters">
+                  <button class="active" data-store-shortage-filter="all" type="button">Wszystkie</button>
+                  <button data-store-shortage-filter="todo" type="button"><span class="dot red"></span>Do zamówienia</button>
+                  <button data-store-shortage-filter="ordered" type="button"><span class="dot amber"></span>Zamówione</button>
+                  <button data-store-shortage-filter="delivered" type="button"><span class="dot green"></span>Uzupełnione</button>
+                </div>
+              </header>
+              <div class="store-shortages-list" id="storeShortagesList"></div>
+            </article>
+
+            <aside class="store-shortages-side">
+              <form class="panel form-panel store-shortage-form-panel" id="storeShortageForm">
+                <header class="panel-header">
+                  <h2>Dodaj brak</h2>
+                </header>
+                <label>Czego brakuje?
+                  <input id="storeShortageNameInput" name="name" placeholder="np. Szkło hartowane iPhone 15" required />
+                </label>
+                <div class="form-row">
+                  <label>Ilość
+                    <input id="storeShortageQuantityInput" name="quantity" placeholder="np. 20 szt." required />
+                  </label>
+                  <label>Priorytet
+                    <select id="storeShortagePriorityInput" name="priority">
+                      <option value="important">Ważne</option>
+                      <option value="urgent">Pilne</option>
+                      <option value="normal">Zwykłe</option>
+                    </select>
+                  </label>
+                </div>
+                <label>Skąd zamówić?
+                  <input id="storeShortageSourceInput" name="source" placeholder="np. GSM-Parts / hurtownia / link do sklepu" />
+                </label>
+                <label>Notatka (opcjonalnie)
+                  <input id="storeShortageNoteInput" name="note" placeholder="np. zostały 4 szt." />
+                </label>
+                <button class="primary-button" type="submit">Dodaj do listy</button>
+              </form>
+
+              <article class="panel store-shortages-summary-panel">
+                <header class="panel-header">
+                  <h2>Podsumowanie</h2>
+                </header>
+                <div class="store-shortages-summary" id="storeShortagesSummary"></div>
+              </article>
+            </aside>
           </div>
         </section>
 
@@ -1154,6 +1297,14 @@
                   </span>
                 </label>
                 <label class="settings-toggle">
+                  <input type="checkbox" value="storeShortages" data-settings-notification />
+                  <span class="settings-toggle-control"></span>
+                  <span>
+                    <strong>Braki na sklepie</strong>
+                    <small>Nowe pozycje i zmiany statusów listy braków</small>
+                  </span>
+                </label>
+                <label class="settings-toggle">
                   <input type="checkbox" value="reports" data-settings-notification />
                   <span class="settings-toggle-control"></span>
                   <span>
@@ -1206,22 +1357,6 @@
           </div>
         </section>
       </main>
-    </div>
-
-    <div class="demobar source-demobar" id="sourceDemoBar">
-      <span class="lab">PALETA</span>
-      <div class="sw">
-        <button data-source-accent="indigo" type="button"><span class="swatch" style="background:#4f46e5"></span>Granat</button>
-        <button data-source-accent="blue" type="button"><span class="swatch" style="background:#2563eb"></span>Grafit</button>
-        <button data-source-accent="green" type="button"><span class="swatch" style="background:#0d9488"></span>Zieleń</button>
-        <button data-source-accent="red" type="button"><span class="swatch" style="background:#dc2626"></span>Czerwony</button>
-      </div>
-      <div class="divider"></div>
-      <span class="lab">TRYB</span>
-      <div class="sw">
-        <button data-source-theme="light" type="button">☀ Jasny</button>
-        <button data-source-theme="dark" type="button">☾ Ciemny</button>
-      </div>
     </div>
 
     <dialog id="postDialog" class="modal">
@@ -1549,6 +1684,75 @@
       </form>
     </dialog>
 
+    <dialog id="adminTimeEditDialog" class="modal">
+      <form id="adminTimeEditForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow" id="adminTimeEditContext">Ewidencja czasu</p>
+            <h2>Edytuj wbicie pracownika</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <div class="task-form-grid admin-time-edit-grid">
+          <label class="admin-time-user-field">Pracownik
+            <select id="adminTimeUserSelect" required></select>
+          </label>
+          <label>Data
+            <input id="adminTimeDateInput" type="date" required />
+          </label>
+          <label>Wbicie
+            <input id="adminTimeStartInput" type="time" step="300" required />
+          </label>
+          <label>Wybicie
+            <input id="adminTimeEndInput" type="time" step="300" />
+          </label>
+          <label>Przerwa (min)
+            <input id="adminTimeBreakInput" type="number" min="0" step="5" value="0" />
+          </label>
+        </div>
+        <input id="adminTimeSessionInput" type="hidden" />
+        <p class="note admin-time-edit-note">Puste pole wybicia oznacza, że pracownik pozostaje wbity. Zamknięty wpis zostanie dopisany do grafiku tygodnia.</p>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Zapisz czas</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="correctionFormDialog" class="modal">
+      <form id="correctionForm">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Korekta czasu</p>
+            <h2>Zgłoś poprawkę ewidencji</h2>
+          </div>
+          <button class="icon-button" data-close-dialog type="button" aria-label="Zamknij">×</button>
+        </header>
+        <div class="task-form-grid correction-form-grid">
+          <label>Data
+            <input id="correctionDateInput" type="date" required />
+          </label>
+          <label>Od
+            <input id="correctionStartInput" type="time" step="300" required />
+          </label>
+          <label>Do
+            <input id="correctionEndInput" type="time" step="300" required />
+          </label>
+          <label>Przerwa (min)
+            <input id="correctionBreakInput" type="number" min="0" step="5" value="0" />
+          </label>
+          <label class="correction-reason-field">Powód korekty
+            <textarea id="correctionReasonInput" rows="3" maxlength="220" placeholder="Np. zapomniałem wybić się po zakończeniu pracy"></textarea>
+          </label>
+        </div>
+        <p class="note correction-form-note">Po akceptacji admina korekta zostanie zapisana w ewidencji czasu i grafiku pracy.</p>
+        <menu>
+          <button class="secondary-button" data-close-dialog type="button">Anuluj</button>
+          <button class="primary-button" type="submit">Wyślij korektę</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="bulkScheduleDialog" class="modal">
       <form id="bulkScheduleForm">
         <header class="modal-header">
@@ -1694,6 +1898,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <script src="data.js?v=78"></script>
-    <script src="app.js?v=144"></script>
+    <script src="app.js?v=156"></script>
   </body>
 </html>

@@ -57,10 +57,13 @@ WORK_DAYS = (
 WORK_DAY_KEYS = {key for key, _label in WORK_DAYS}
 WORK_DAY_INDEX = {key: index for index, (key, _label) in enumerate(WORK_DAYS)}
 AUTO_TIME_RECORD_NOTE = "ewidencja_czasu"
+CORRECTION_TIME_RECORD_NOTE = "korekta_czasu"
+MANUAL_TIME_RECORD_NOTE = "reczna_edycja_czasu"
 DEFAULT_NOTIFICATION_PREFERENCES = {
     "chat": True,
     "tasks": True,
     "inventory": True,
+    "storeShortages": True,
     "reports": True,
     "announcements": True,
     "time": True,
@@ -280,8 +283,11 @@ def time_session_day_log(rows: list[sqlite3.Row], day_start: datetime, now: date
             break_seconds += seconds_between(break_started, now)
         entries.append(
             {
+                "id": row["id"],
                 "start": session_time_label(row["started_at"]),
                 "end": session_time_label(row["ended_at"]) if row["ended_at"] else "",
+                "startedAt": row["started_at"],
+                "endedAt": row["ended_at"] or "",
                 "status": "W toku" if not row["ended_at"] else "Zakończone",
                 "durationSeconds": worked_seconds,
                 "breakSeconds": max(0, break_seconds),
@@ -1145,6 +1151,23 @@ def initialize_database() -> None:
               FOREIGN KEY (owner_login) REFERENCES users(login) ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS store_shortages (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              quantity TEXT NOT NULL DEFAULT '',
+              source TEXT NOT NULL DEFAULT '',
+              note TEXT NOT NULL DEFAULT '',
+              priority TEXT NOT NULL DEFAULT 'important',
+              status TEXT NOT NULL DEFAULT 'todo',
+              owner_login TEXT,
+              owner_name TEXT,
+              ordered_by TEXT NOT NULL DEFAULT '',
+              delivered_by TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (owner_login) REFERENCES users(login) ON DELETE SET NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
             CREATE INDEX IF NOT EXISTS idx_users_role ON users(app_role);
             CREATE INDEX IF NOT EXISTS idx_permissions_permission ON user_permissions(permission);
@@ -1175,6 +1198,7 @@ def initialize_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_knowledge_articles_created ON knowledge_articles(created_at);
             CREATE INDEX IF NOT EXISTS idx_handover_notes_created ON handover_notes(created_at);
             CREATE INDEX IF NOT EXISTS idx_inventory_items_status ON inventory_items(quantity, minimum, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_store_shortages_status ON store_shortages(status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_handover_accepts_user ON handover_accepts(user_login, accepted_at);
             CREATE INDEX IF NOT EXISTS idx_weekly_kudos_week ON weekly_kudos(week_start, created_at);
             CREATE INDEX IF NOT EXISTS idx_weekly_kudos_recipient ON weekly_kudos(recipient_login, week_start);
@@ -1188,7 +1212,7 @@ def initialize_database() -> None:
             "database_role": "LAN server local file",
             "planned_lan_ip": "192.168.1.101",
             "backend": "python-standard-library",
-            "schema_version": "24",
+            "schema_version": "25",
         }
         for key, value in meta.items():
             conn.execute(
@@ -1762,6 +1786,8 @@ def sync_completed_session_to_schedule(
     user_login: str,
     started_at_text: str | None,
     ended_at_text: str | None,
+    updated_by: str | None = None,
+    note: str = AUTO_TIME_RECORD_NOTE,
 ) -> dict | None:
     started = parse_iso(started_at_text)
     ended = parse_iso(ended_at_text)
@@ -1792,7 +1818,7 @@ def sync_completed_session_to_schedule(
         """,
         (user_login, week_start, day_key),
     ).fetchone()
-    if existing and existing["note"] == AUTO_TIME_RECORD_NOTE:
+    if existing and existing["note"] in {AUTO_TIME_RECORD_NOTE, MANUAL_TIME_RECORD_NOTE}:
         existing_start = parse_schedule_minutes(existing["start_time"])
         existing_end = parse_schedule_minutes(existing["end_time"])
         if existing_start is not None:
@@ -1813,9 +1839,402 @@ def sync_completed_session_to_schedule(
           updated_by = excluded.updated_by,
           updated_at = excluded.updated_at
         """,
-        (user_login, week_start, day_key, start_time, end_time, AUTO_TIME_RECORD_NOTE, user_login, ended_at_text),
+        (user_login, week_start, day_key, start_time, end_time, note, updated_by or user_login, ended_at_text),
     )
     return {"weekStart": week_start, "day": day_key, "value": f"{start_time}-{end_time}"}
+
+
+def local_date_from_iso_text(value: str | None) -> str:
+    parsed = parse_iso(value)
+    return parsed.astimezone().strftime("%Y-%m-%d") if parsed else ""
+
+
+def session_matches_local_date(session: sqlite3.Row | None, date_value: str) -> bool:
+    return bool(session and local_date_from_iso_text(session["started_at"]) == date_value)
+
+
+def latest_time_session_for_local_date(
+    conn: sqlite3.Connection,
+    user_login: str,
+    date_value: str,
+) -> sqlite3.Row | None:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM time_sessions
+        WHERE user_login = ?
+        ORDER BY ended_at IS NULL DESC, started_at DESC, created_at DESC
+        """,
+        (user_login,),
+    ).fetchall()
+    return next((row for row in rows if session_matches_local_date(row, date_value)), None)
+
+
+def parse_time_correction_detail(detail: str) -> tuple[dict | None, str | None]:
+    text = str(detail or "")
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+    time_match = re.search(
+        r"([01]?\d|2[0-3]):([0-5]\d)\s*[-\u2013\u2014]\s*([01]?\d|2[0-3]):([0-5]\d)",
+        text,
+    )
+    if not date_match or not time_match:
+        return None, "Wniosek korekty nie zawiera daty oraz zakresu godzin."
+
+    date_value = date_match.group(1)
+    start_time = f"{int(time_match.group(1)):02d}:{time_match.group(2)}"
+    end_time = f"{int(time_match.group(3)):02d}:{time_match.group(4)}"
+    try:
+        local_start = datetime.strptime(f"{date_value} {start_time}", "%Y-%m-%d %H:%M").astimezone()
+        local_end = datetime.strptime(f"{date_value} {end_time}", "%Y-%m-%d %H:%M").astimezone()
+    except ValueError:
+        return None, "Nieprawidlowa data albo godzina korekty."
+    if local_end <= local_start:
+        return None, "Godzina konca korekty musi byc pozniejsza niz start."
+
+    break_minutes = 0
+    break_match = re.search(r"Przerwa\s+(\d{1,4})\s*min", text, re.IGNORECASE)
+    if break_match:
+        break_minutes = max(0, int(break_match.group(1)))
+    break_seconds = break_minutes * 60
+    duration_seconds = seconds_between(local_start, local_end)
+    if break_seconds >= duration_seconds:
+        return None, "Przerwa nie moze byc dluzsza lub rowna calemu czasowi pracy."
+
+    week_start = normalize_week_start(date_value)
+    weekday_index = local_start.weekday()
+    day_key = WORK_DAYS[weekday_index][0] if weekday_index < len(WORK_DAYS) else ""
+    return (
+        {
+            "date": date_value,
+            "startTime": start_time,
+            "endTime": end_time,
+            "startedAt": iso_from_dt(local_start),
+            "endedAt": iso_from_dt(local_end),
+            "breakSeconds": break_seconds,
+            "weekStart": week_start,
+            "dayKey": day_key,
+        },
+        None,
+    )
+
+
+def apply_time_correction_request(
+    conn: sqlite3.Connection,
+    request: sqlite3.Row,
+    actor: sqlite3.Row,
+) -> tuple[dict | None, str | None]:
+    parsed, error = parse_time_correction_detail(request["detail"])
+    if error:
+        return None, error
+    assert parsed is not None
+    open_session = open_time_session(conn, request["owner_login"])
+    editable_session = open_session if session_matches_local_date(open_session, parsed["date"]) else latest_time_session_for_local_date(
+        conn,
+        request["owner_login"],
+        parsed["date"],
+    )
+    if editable_session:
+        session_id = editable_session["id"]
+        created_at = editable_session["created_at"]
+    else:
+        session_id = f"correction-{request['id']}"
+        existing_session = conn.execute("SELECT * FROM time_sessions WHERE id = ?", (session_id,)).fetchone()
+        created_at = existing_session["created_at"] if existing_session else request["created_at"]
+    now = now_text()
+    conn.execute(
+        """
+        INSERT INTO time_sessions(id, user_login, started_at, ended_at, total_break_seconds, break_started_at, created_at, updated_at)
+        VALUES(?, ?, ?, ?, ?, NULL, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          started_at = excluded.started_at,
+          ended_at = excluded.ended_at,
+          total_break_seconds = excluded.total_break_seconds,
+          break_started_at = NULL,
+          updated_at = excluded.updated_at
+        """,
+        (
+            session_id,
+            request["owner_login"],
+            parsed["startedAt"],
+            parsed["endedAt"],
+            parsed["breakSeconds"],
+            created_at,
+            now,
+        ),
+    )
+    schedule_sync = None
+    if parsed["dayKey"]:
+        conn.execute(
+            """
+            INSERT INTO work_schedule_weeks(user_login, week_start, day_key, start_time, end_time, note, updated_by, updated_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_login, week_start, day_key) DO UPDATE SET
+              start_time = excluded.start_time,
+              end_time = excluded.end_time,
+              note = excluded.note,
+              updated_by = excluded.updated_by,
+              updated_at = excluded.updated_at
+            """,
+            (
+                request["owner_login"],
+                parsed["weekStart"],
+                parsed["dayKey"],
+                parsed["startTime"],
+                parsed["endTime"],
+                CORRECTION_TIME_RECORD_NOTE,
+                actor["login"],
+                now,
+            ),
+        )
+        schedule_sync = {
+            "weekStart": parsed["weekStart"],
+            "day": parsed["dayKey"],
+            "value": f"{parsed['startTime']}-{parsed['endTime']}",
+        }
+    open_session_after = open_time_session(conn, request["owner_login"])
+    if open_session_after:
+        conn.execute(
+            """
+            INSERT INTO user_presence(user_login, clocked_in, break_active, started_at, updated_at)
+            VALUES(?, 1, ?, ?, ?)
+            ON CONFLICT(user_login) DO UPDATE SET
+              clocked_in = excluded.clocked_in,
+              break_active = excluded.break_active,
+              started_at = excluded.started_at,
+              updated_at = excluded.updated_at
+            """,
+            (
+                request["owner_login"],
+                1 if open_session_after["break_started_at"] else 0,
+                open_session_after["started_at"],
+                now,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO user_presence(user_login, clocked_in, break_active, started_at, updated_at)
+            VALUES(?, 0, 0, NULL, ?)
+            ON CONFLICT(user_login) DO UPDATE SET
+              clocked_in = excluded.clocked_in,
+              break_active = excluded.break_active,
+              started_at = excluded.started_at,
+              updated_at = excluded.updated_at
+            """,
+            (request["owner_login"], now),
+        )
+    conn.execute(
+        "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'APPLY_TIME_CORRECTION', ?)",
+        (actor["login"], json.dumps({"requestId": request["id"], "sessionId": session_id, "schedule": schedule_sync}, ensure_ascii=False)),
+    )
+    parsed["sessionId"] = session_id
+    parsed["schedule"] = schedule_sync
+    return parsed, None
+
+
+def remove_time_correction_request(
+    conn: sqlite3.Connection,
+    request: sqlite3.Row,
+    actor: sqlite3.Row,
+) -> dict | None:
+    parsed, _error = parse_time_correction_detail(request["detail"])
+    session_id = f"correction-{request['id']}"
+    conn.execute("DELETE FROM time_sessions WHERE id = ?", (session_id,))
+    if parsed and parsed.get("dayKey"):
+        conn.execute(
+            """
+            DELETE FROM work_schedule_weeks
+            WHERE user_login = ? AND week_start = ? AND day_key = ? AND note = ?
+            """,
+            (request["owner_login"], parsed["weekStart"], parsed["dayKey"], CORRECTION_TIME_RECORD_NOTE),
+        )
+    conn.execute(
+        "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'REMOVE_TIME_CORRECTION', ?)",
+        (actor["login"], request["id"]),
+    )
+    return {"sessionId": session_id, "schedule": parsed}
+
+
+def parse_manual_time_entry_payload(payload: dict) -> tuple[dict | None, str | None]:
+    date_value = str(payload.get("date", "")).strip()[:10]
+    start_time = str(payload.get("startTime", "")).strip()
+    end_time = str(payload.get("endTime", "")).strip()
+    try:
+        break_minutes = max(0, int(float(str(payload.get("breakMinutes", 0) or 0).replace(",", "."))))
+    except ValueError:
+        return None, "Przerwa musi byc liczba minut."
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_value):
+        return None, "Wybierz date wpisu."
+    if parse_schedule_minutes(start_time) is None:
+        return None, "Podaj poprawna godzine wbicia."
+    if end_time and parse_schedule_minutes(end_time) is None:
+        return None, "Podaj poprawna godzine wybicia albo zostaw pole puste."
+    try:
+        local_start = datetime.strptime(f"{date_value} {start_time}", "%Y-%m-%d %H:%M").astimezone()
+        local_end = datetime.strptime(f"{date_value} {end_time}", "%Y-%m-%d %H:%M").astimezone() if end_time else None
+    except ValueError:
+        return None, "Nieprawidlowa data albo godzina."
+    if local_start > datetime.now().astimezone() + timedelta(minutes=5):
+        return None, "Godzina wbicia nie moze byc w przyszlosci."
+    if local_end:
+        if local_end <= local_start:
+            return None, "Godzina wybicia musi byc pozniejsza niz wbicie."
+        if local_end > datetime.now().astimezone() + timedelta(minutes=5):
+            return None, "Godzina wybicia nie moze byc w przyszlosci."
+        if break_minutes * 60 >= seconds_between(local_start, local_end):
+            return None, "Przerwa nie moze byc dluzsza lub rowna calemu czasowi pracy."
+    day_index = local_start.weekday()
+    return (
+        {
+            "date": date_value,
+            "startTime": start_time,
+            "endTime": end_time,
+            "startedAt": iso_from_dt(local_start),
+            "endedAt": iso_from_dt(local_end) if local_end else None,
+            "breakSeconds": break_minutes * 60,
+            "weekStart": normalize_week_start(date_value),
+            "dayKey": WORK_DAYS[day_index][0] if day_index < len(WORK_DAYS) else "",
+        },
+        None,
+    )
+
+
+def schedule_key_for_session(started_at_text: str | None) -> tuple[str, str] | None:
+    started = parse_iso(started_at_text)
+    if not started:
+        return None
+    local_started = started.astimezone()
+    day_index = local_started.weekday()
+    if day_index >= len(WORK_DAYS):
+        return None
+    week_start = (local_started.date() - timedelta(days=day_index)).strftime("%Y-%m-%d")
+    return week_start, WORK_DAYS[day_index][0]
+
+
+def admin_update_time_entry(
+    conn: sqlite3.Connection,
+    actor: sqlite3.Row,
+    payload: dict,
+) -> tuple[dict | None, str | None]:
+    user_login = normalize_login(str(payload.get("userLogin", "")))
+    target = fetch_user(conn, user_login)
+    if not target or target["app_role"] == "root" or not target["active"]:
+        return None, "Nie znaleziono aktywnego pracownika."
+    parsed, error = parse_manual_time_entry_payload(payload)
+    if error:
+        return None, error
+    assert parsed is not None
+
+    requested_session_id = str(payload.get("sessionId", "")).strip()
+    existing_session = None
+    if requested_session_id:
+        existing_session = conn.execute(
+            "SELECT * FROM time_sessions WHERE id = ? AND user_login = ?",
+            (requested_session_id, user_login),
+        ).fetchone()
+        if not existing_session:
+            return None, "Nie znaleziono wskazanego wpisu ewidencji."
+        session_id = existing_session["id"]
+    else:
+        open_session = open_time_session(conn, user_login)
+        editable_session = open_session if session_matches_local_date(open_session, parsed["date"]) else latest_time_session_for_local_date(
+            conn,
+            user_login,
+            parsed["date"],
+        )
+        session_id = editable_session["id"] if editable_session else f"manual-{user_login}-{parsed['date']}"
+        existing_session = conn.execute("SELECT * FROM time_sessions WHERE id = ?", (session_id,)).fetchone()
+
+    old_schedule_key = schedule_key_for_session(existing_session["started_at"]) if existing_session and existing_session["ended_at"] else None
+    now = now_text()
+    preserved_break_started_at = existing_session["break_started_at"] if existing_session and not parsed["endedAt"] else None
+    conn.execute(
+        """
+        INSERT INTO time_sessions(id, user_login, started_at, ended_at, total_break_seconds, break_started_at, created_at, updated_at)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          user_login = excluded.user_login,
+          started_at = excluded.started_at,
+          ended_at = excluded.ended_at,
+          total_break_seconds = excluded.total_break_seconds,
+          break_started_at = excluded.break_started_at,
+          updated_at = excluded.updated_at
+        """,
+        (
+            session_id,
+            user_login,
+            parsed["startedAt"],
+            parsed["endedAt"],
+            parsed["breakSeconds"],
+            preserved_break_started_at,
+            existing_session["created_at"] if existing_session else now,
+            now,
+        ),
+    )
+
+    schedule_sync = None
+    if old_schedule_key and old_schedule_key != (parsed["weekStart"], parsed["dayKey"]):
+        conn.execute(
+            """
+            DELETE FROM work_schedule_weeks
+            WHERE user_login = ? AND week_start = ? AND day_key = ? AND note IN (?, ?)
+            """,
+            (user_login, old_schedule_key[0], old_schedule_key[1], AUTO_TIME_RECORD_NOTE, MANUAL_TIME_RECORD_NOTE),
+        )
+    if parsed["endedAt"]:
+        schedule_sync = sync_completed_session_to_schedule(
+            conn,
+            user_login,
+            parsed["startedAt"],
+            parsed["endedAt"],
+            actor["login"],
+            MANUAL_TIME_RECORD_NOTE,
+        )
+
+    open_session_after = open_time_session(conn, user_login)
+    if open_session_after:
+        conn.execute(
+            """
+            INSERT INTO user_presence(user_login, clocked_in, break_active, started_at, updated_at)
+            VALUES(?, 1, ?, ?, ?)
+            ON CONFLICT(user_login) DO UPDATE SET
+              clocked_in = excluded.clocked_in,
+              break_active = excluded.break_active,
+              started_at = excluded.started_at,
+              updated_at = excluded.updated_at
+            """,
+            (
+                user_login,
+                1 if open_session_after["break_started_at"] else 0,
+                open_session_after["started_at"],
+                now,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO user_presence(user_login, clocked_in, break_active, started_at, updated_at)
+            VALUES(?, 0, 0, NULL, ?)
+            ON CONFLICT(user_login) DO UPDATE SET
+              clocked_in = excluded.clocked_in,
+              break_active = excluded.break_active,
+              started_at = excluded.started_at,
+              updated_at = excluded.updated_at
+            """,
+            (user_login, now),
+        )
+
+    result = {
+        **parsed,
+        "sessionId": session_id,
+        "userLogin": user_login,
+        "schedule": schedule_sync,
+    }
+    conn.execute(
+        "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'ADMIN_UPDATE_TIME_ENTRY', ?)",
+        (actor["login"], json.dumps(result, ensure_ascii=False)),
+    )
+    return result, None
 
 
 def schedule_rows_map(conn: sqlite3.Connection, week_start: str | None = None) -> dict[tuple[str, str], sqlite3.Row]:
@@ -1897,6 +2316,38 @@ def schedule_snapshot(conn: sqlite3.Connection, users: list[sqlite3.Row], week_s
     return {"weekStart": selected_week_start, "weekEnd": week_end, "days": days, "rows": rows}
 
 
+def normalized_time_sessions_for_summary(sessions: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    grouped: dict[tuple[str, str], list[sqlite3.Row]] = {}
+    passthrough = []
+    for session in sessions:
+        date_value = local_date_from_iso_text(session["started_at"])
+        if not date_value:
+            passthrough.append(session)
+            continue
+        grouped.setdefault((session["user_login"], date_value), []).append(session)
+
+    normalized = []
+    for rows in grouped.values():
+        replacement_rows = [
+            row
+            for row in rows
+            if str(row["id"]).startswith("correction-") or str(row["id"]).startswith("manual-")
+        ]
+        if replacement_rows:
+            replacement = max(replacement_rows, key=lambda row: (row["updated_at"] or "", row["started_at"] or ""))
+            normalized.append(replacement)
+            replacement_end = parse_iso(replacement["ended_at"])
+            for row in rows:
+                if row["id"] == replacement["id"]:
+                    continue
+                started = parse_iso(row["started_at"])
+                if not row["ended_at"] and replacement_end and started and started > replacement_end:
+                    normalized.append(row)
+        else:
+            normalized.extend(rows)
+    return sorted(passthrough + normalized, key=lambda row: row["started_at"] or "")
+
+
 def time_summary(conn: sqlite3.Connection, user: sqlite3.Row, schedule_week_start: str | None = None) -> dict:
     now = utc_now()
     now_iso = iso_from_dt(now)
@@ -1924,6 +2375,7 @@ def time_summary(conn: sqlite3.Connection, user: sqlite3.Row, schedule_week_star
         """,
         (iso_from_dt(earliest_start), iso_from_dt(earliest_start)),
     ).fetchall()
+    sessions = normalized_time_sessions_for_summary(sessions)
     sessions_by_user: dict[str, list[sqlite3.Row]] = {row["login"]: [] for row in users}
     for session in sessions:
         sessions_by_user.setdefault(session["user_login"], []).append(session)
@@ -1946,6 +2398,7 @@ def time_summary(conn: sqlite3.Connection, user: sqlite3.Row, schedule_week_star
             "weekSeconds": week_seconds,
             "monthSeconds": month_seconds,
             "scheduledMonthSeconds": scheduled_month_totals.get(person["login"], 0),
+            "dayLog": time_session_day_log(user_sessions, today_start, now),
         })
 
     selected_schedule_week_start = normalize_week_start(schedule_week_start)
@@ -2296,6 +2749,49 @@ def inventory_snapshot(conn: sqlite3.Connection) -> dict:
         """
     ).fetchall()
     return {"items": [inventory_item_payload(row) for row in rows]}
+
+
+def normalize_store_shortage_status(value: str) -> str:
+    status = str(value or "").strip()
+    return status if status in {"todo", "ordered", "delivered"} else "todo"
+
+
+def normalize_store_shortage_priority(value: str) -> str:
+    priority = str(value or "").strip()
+    return priority if priority in {"urgent", "important", "normal"} else "important"
+
+
+def store_shortage_payload(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "quantity": row["quantity"] or "",
+        "source": row["source"] or "",
+        "note": row["note"] or "",
+        "priority": normalize_store_shortage_priority(row["priority"]),
+        "status": normalize_store_shortage_status(row["status"]),
+        "owner": row["owner_name"] or "",
+        "ownerLogin": row["owner_login"] or "",
+        "orderedBy": row["ordered_by"] or "",
+        "deliveredBy": row["delivered_by"] or "",
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def store_shortages_snapshot(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM store_shortages
+        ORDER BY
+          CASE status WHEN 'todo' THEN 0 WHEN 'ordered' THEN 1 ELSE 2 END,
+          updated_at DESC,
+          created_at DESC,
+          name COLLATE NOCASE
+        """
+    ).fetchall()
+    return {"items": [store_shortage_payload(row) for row in rows]}
 
 
 def calendar_event_payload(conn: sqlite3.Connection, row: sqlite3.Row, user: sqlite3.Row) -> dict:
@@ -2759,6 +3255,11 @@ class ProkomHandler(BaseHTTPRequestHandler):
                     if actor:
                         self.copy_previous_work_schedule(conn, actor)
                     return
+                if path == "/api/time/admin-entry" and method in ("POST", "PATCH"):
+                    actor = self.require_admin(conn)
+                    if actor:
+                        self.update_time_entry_admin(conn, actor)
+                    return
                 if path == "/api/time/presence" and method in ("POST", "PATCH"):
                     user = self.current_user(conn)
                     if not user:
@@ -2923,6 +3424,28 @@ class ProkomHandler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
                         return
                     self.create_inventory_item(conn, user)
+                    return
+                if path == "/api/store-shortages" and method == "GET":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.send_json(store_shortages_snapshot(conn))
+                    return
+                if path == "/api/store-shortages" and method == "POST":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    self.create_store_shortage(conn, user)
+                    return
+                if path.startswith("/api/store-shortages/") and method == "PATCH":
+                    user = self.current_user(conn)
+                    if not user:
+                        self.send_json({"error": "Brak aktywnej sesji."}, HTTPStatus.UNAUTHORIZED)
+                        return
+                    shortage_id = unquote(path.removeprefix("/api/store-shortages/"))
+                    self.update_store_shortage(conn, user, shortage_id)
                     return
                 if path == "/api/calendar" and method == "GET":
                     user = self.current_user(conn)
@@ -3217,6 +3740,17 @@ class ProkomHandler(BaseHTTPRequestHandler):
             ),
         )
         self.send_json(snapshot(conn))
+
+    def update_time_entry_admin(self, conn: sqlite3.Connection, actor: sqlite3.Row) -> None:
+        payload = self.read_json()
+        result, error = admin_update_time_entry(conn, actor, payload)
+        if error:
+            self.send_json({"error": error}, HTTPStatus.BAD_REQUEST)
+            return
+        week_start = result.get("weekStart") if result else str(payload.get("weekStart", "")).strip()
+        response = time_summary(conn, actor, week_start)
+        response["timeEntry"] = result
+        self.send_json(response)
 
     def update_work_schedule(self, conn: sqlite3.Connection, actor: sqlite3.Row) -> None:
         payload = self.read_json()
@@ -4210,6 +4744,14 @@ class ProkomHandler(BaseHTTPRequestHandler):
         if status not in REQUEST_STATUSES:
             self.send_json({"error": "Nieznany status wniosku."}, HTTPStatus.BAD_REQUEST)
             return
+        correction_result = None
+        if request["kind"] == "correction" and status == "Zaakceptowane":
+            correction_result, correction_error = apply_time_correction_request(conn, request, user)
+            if correction_error:
+                self.send_json({"error": correction_error}, HTTPStatus.BAD_REQUEST)
+                return
+        elif request["kind"] == "correction" and status == "Odrzucone":
+            correction_result = remove_time_correction_request(conn, request, user)
         conn.execute(
             """
             UPDATE employee_requests
@@ -4226,6 +4768,9 @@ class ProkomHandler(BaseHTTPRequestHandler):
         response["request"] = request_payload(
             conn.execute("SELECT * FROM employee_requests WHERE id = ?", (request_id,)).fetchone()
         )
+        if request["kind"] == "correction":
+            response["correction"] = correction_result
+            response["timeSummary"] = time_summary(conn, user)
         self.send_json(response)
 
     def create_inventory_item(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
@@ -4282,6 +4827,90 @@ class ProkomHandler(BaseHTTPRequestHandler):
             conn.execute("SELECT * FROM inventory_items WHERE id = ?", (item_id,)).fetchone()
         )
         self.send_json(response, HTTPStatus.CREATED)
+
+    def create_store_shortage(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
+        payload = self.read_json()
+        name = str(payload.get("name", "")).strip()
+        quantity = str(payload.get("quantity", "")).strip()
+        if not name:
+            self.send_json({"error": "Podaj nazwe brakujacego towaru."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not quantity:
+            self.send_json({"error": "Podaj ilosc brakujacego towaru."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        item_id = f"store-shortage-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        now = now_text()
+        source = str(payload.get("source", "")).strip()[:220]
+        note = str(payload.get("note", "")).strip()[:260]
+        priority = normalize_store_shortage_priority(payload.get("priority", "important"))
+        conn.execute(
+            """
+            INSERT INTO store_shortages(
+              id, name, quantity, source, note, priority, status, owner_login, owner_name, created_at, updated_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?)
+            """,
+            (
+                item_id,
+                name[:180],
+                quantity[:80],
+                source,
+                note,
+                priority,
+                user["login"],
+                user["display_name"],
+                now,
+                now,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'CREATE_STORE_SHORTAGE', ?)",
+            (user["login"], item_id),
+        )
+        response = store_shortages_snapshot(conn)
+        response["item"] = store_shortage_payload(
+            conn.execute("SELECT * FROM store_shortages WHERE id = ?", (item_id,)).fetchone()
+        )
+        self.send_json(response, HTTPStatus.CREATED)
+
+    def update_store_shortage(self, conn: sqlite3.Connection, user: sqlite3.Row, shortage_id: str) -> None:
+        payload = self.read_json()
+        next_status = normalize_store_shortage_status(payload.get("status", "todo"))
+        item = conn.execute("SELECT * FROM store_shortages WHERE id = ?", (shortage_id,)).fetchone()
+        if not item:
+            self.send_json({"error": "Nie znaleziono pozycji na liscie brakow."}, HTTPStatus.NOT_FOUND)
+            return
+
+        ordered_by = item["ordered_by"] or ""
+        delivered_by = item["delivered_by"] or ""
+        if next_status == "todo":
+            ordered_by = ""
+            delivered_by = ""
+        elif next_status == "ordered":
+            ordered_by = user["display_name"]
+            delivered_by = ""
+        elif next_status == "delivered":
+            ordered_by = ordered_by or user["display_name"]
+            delivered_by = user["display_name"]
+
+        conn.execute(
+            """
+            UPDATE store_shortages
+            SET status = ?, ordered_by = ?, delivered_by = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (next_status, ordered_by, delivered_by, now_text(), shortage_id),
+        )
+        conn.execute(
+            "INSERT INTO audit_log(actor_login, action, details) VALUES(?, 'UPDATE_STORE_SHORTAGE', ?)",
+            (user["login"], f"{shortage_id}: {next_status}"),
+        )
+        response = store_shortages_snapshot(conn)
+        response["item"] = store_shortage_payload(
+            conn.execute("SELECT * FROM store_shortages WHERE id = ?", (shortage_id,)).fetchone()
+        )
+        self.send_json(response)
 
     def create_calendar_event(self, conn: sqlite3.Connection, user: sqlite3.Row) -> None:
         payload = self.read_json()

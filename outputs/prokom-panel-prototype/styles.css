@@ -12596,6 +12596,11 @@ table tbody tr:hover {
   grid-column: span 1 !important;
 }
 
+#time .saturday-wage-card {
+  order: 4;
+  grid-column: span 1 !important;
+}
+
 #time #leaveForm {
   order: 4;
   grid-column: span 1 !important;
@@ -12614,7 +12619,8 @@ table tbody tr:hover {
 #time .time-day-log-panel,
 #time .time-clock-panel,
 #time .time-pulse-panel,
-#time .wage-panel {
+#time .wage-panel,
+#time .saturday-wage-card {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -13556,6 +13562,373 @@ table tbody tr:hover {
   }
 }
 
+#storeShortages.store-shortages-view {
+  padding-left: 4px;
+}
+
+#storeShortages .store-shortages-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+#storeShortages .store-shortages-head h2 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: clamp(24px, 2vw, 30px);
+  line-height: 1.05;
+}
+
+#storeShortages .store-shortages-head p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13.5px;
+}
+
+#storeShortages .store-shortages-head-actions,
+#storeShortages .store-shortage-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+#storeShortages .store-shortages-head-actions svg {
+  width: 15px;
+  height: 15px;
+}
+
+#storeShortages .store-shortages-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 18px;
+  align-items: start;
+}
+
+#storeShortages .store-shortages-list-panel,
+#storeShortages .store-shortage-form-panel,
+#storeShortages .store-shortages-summary-panel {
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border), var(--text) 4%);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+#storeShortages .panel-header {
+  margin: 0;
+  min-height: 64px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+#storeShortages .panel-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+}
+
+#storeShortages .store-shortages-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#storeShortages .store-shortages-filters button {
+  min-height: 32px;
+  padding-inline: 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-weight: 760;
+}
+
+#storeShortages .store-shortages-filters button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--primary), transparent 78%);
+}
+
+#storeShortages .store-shortages-filters .dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  border-radius: 999px;
+  vertical-align: -1px;
+}
+
+#storeShortages .store-shortages-filters .dot.red,
+#storeShortages .summary-count.red {
+  background: var(--red);
+}
+
+#storeShortages .store-shortages-filters .dot.amber,
+#storeShortages .summary-count.amber {
+  background: var(--amber);
+}
+
+#storeShortages .store-shortages-filters .dot.green,
+#storeShortages .summary-count.green {
+  background: var(--green);
+}
+
+#storeShortages .store-shortages-list {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px 18px;
+}
+
+#storeShortages .store-shortage-card {
+  display: grid;
+  gap: 12px;
+  min-height: 110px;
+  padding: 15px 14px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
+  border-radius: 12px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--red), transparent 92%), transparent 40%),
+    color-mix(in srgb, var(--surface), var(--surface-soft) 18%);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+#storeShortages .store-shortage-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--primary), var(--border) 42%);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--text), transparent 92%);
+}
+
+#storeShortages .store-shortage-card.is-ordered {
+  border-left-color: var(--amber);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--amber), transparent 92%), transparent 40%),
+    color-mix(in srgb, var(--surface), var(--surface-soft) 18%);
+}
+
+#storeShortages .store-shortage-card.is-delivered {
+  border-left-color: var(--primary);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary), transparent 92%), transparent 40%),
+    color-mix(in srgb, var(--surface), var(--surface-soft) 18%);
+}
+
+#storeShortages .store-shortage-card.is-highlighted {
+  animation: storeShortagePulse 1.8s ease;
+}
+
+@keyframes storeShortagePulse {
+  35%,
+  70% {
+    box-shadow: 0 0 0 4px var(--primary-ring);
+  }
+}
+
+#storeShortages .store-shortage-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+#storeShortages .store-shortage-top h3 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+#storeShortages .store-shortage-top p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+#storeShortages .store-shortage-status,
+#storeShortages .store-shortage-priority {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 820;
+}
+
+#storeShortages .store-shortage-status.is-todo,
+#storeShortages .store-shortage-priority.urgent {
+  background: color-mix(in srgb, var(--red), transparent 84%);
+  color: var(--red);
+}
+
+#storeShortages .store-shortage-status.is-ordered,
+#storeShortages .store-shortage-priority.important {
+  background: color-mix(in srgb, var(--amber), transparent 84%);
+  color: var(--amber);
+}
+
+#storeShortages .store-shortage-status.is-delivered,
+#storeShortages .store-shortage-priority.normal {
+  background: color-mix(in srgb, var(--primary), transparent 84%);
+  color: var(--primary);
+}
+
+#storeShortages .store-shortage-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: var(--surface-soft);
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+#storeShortages .store-shortage-note::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 1.8px solid var(--primary);
+  border-radius: 3px;
+  box-shadow: inset -3px -3px 0 color-mix(in srgb, var(--primary), transparent 82%);
+}
+
+#storeShortages .store-shortage-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+#storeShortages .store-shortage-footer > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#storeShortages .store-shortage-actions .secondary-button {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+
+#storeShortages .store-shortages-side {
+  display: grid;
+  gap: 16px;
+}
+
+#storeShortages .store-shortage-form-panel {
+  display: grid;
+  position: static;
+  gap: 14px;
+}
+
+#storeShortages .store-shortage-form-panel label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+#storeShortages .store-shortage-form-panel input,
+#storeShortages .store-shortage-form-panel select {
+  min-height: 38px;
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+#storeShortages .store-shortage-form-panel .form-row {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 10px;
+}
+
+#storeShortages .store-shortage-form-panel > .primary-button {
+  width: calc(100% - 36px);
+  min-height: 38px;
+  justify-self: center;
+  margin: 0 18px 18px;
+  justify-content: center;
+}
+
+#storeShortages .store-shortage-form-panel > label,
+#storeShortages .store-shortage-form-panel > .form-row {
+  padding-inline: 18px;
+}
+
+#storeShortages .store-shortages-summary {
+  display: grid;
+  gap: 13px;
+  padding: 18px;
+}
+
+#storeShortages .store-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#storeShortages .summary-count {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 840;
+}
+
+#storeShortages .store-summary-row strong,
+#storeShortages .store-summary-row small {
+  display: block;
+}
+
+#storeShortages .store-summary-row small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+[data-theme="dark"] #storeShortages .store-shortages-list-panel,
+[data-theme="dark"] #storeShortages .store-shortage-form-panel,
+[data-theme="dark"] #storeShortages .store-shortages-summary-panel {
+  background: #121622;
+  border-color: #29334b;
+}
+
+[data-theme="dark"] #storeShortages .store-shortage-card {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--red), transparent 88%), transparent 48%),
+    #151b2a;
+}
+
+[data-theme="dark"] #storeShortages .store-shortage-card.is-ordered {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--amber), transparent 88%), transparent 48%),
+    #151b2a;
+}
+
+[data-theme="dark"] #storeShortages .store-shortage-card.is-delivered {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary), transparent 88%), transparent 48%),
+    #151b2a;
+}
+
 @media (max-width: 700px) {
   #time .schedule-week-board {
     min-width: 820px;
@@ -13602,6 +13975,7 @@ table tbody tr:hover {
   #time .time-clock-panel,
   #time .time-pulse-panel,
   #time .wage-panel,
+  #time .saturday-wage-card,
   #time #leaveForm {
     grid-template-columns: 1fr !important;
     grid-column: 1 / -1 !important;
@@ -13638,6 +14012,31 @@ table tbody tr:hover {
 
   #inventory .inventory-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #storeShortages .store-shortages-head,
+  #storeShortages .store-shortages-head-actions,
+  #storeShortages .store-shortage-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #storeShortages .store-shortages-head-actions > button,
+  #storeShortages .store-shortage-actions > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  #storeShortages .store-shortages-layout {
+    grid-template-columns: 1fr;
+  }
+
+  #storeShortages .store-shortage-form-panel .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  #storeShortages .store-shortage-top {
+    flex-direction: column;
   }
 }
 
@@ -14100,6 +14499,47 @@ table tbody tr:hover {
   padding: 16px 18px !important;
 }
 
+.source-dashboard-grid .feature-feed-widget .feed-type-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--board-line);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-type-chip {
+  flex: 0 0 auto;
+  gap: 7px !important;
+  white-space: nowrap;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-type-chip small {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-soft), transparent 88%);
+  color: inherit;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-type-chip.active small,
+.source-dashboard-grid .feature-feed-widget .feed-type-chip.on small {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-type-chip:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .source-dashboard-grid .feature-feed-widget .composer {
   margin: 0 0 16px !important;
 }
@@ -14117,9 +14557,159 @@ table tbody tr:hover {
   box-shadow: none !important;
 }
 
+.source-dashboard-grid .feature-feed-widget .composer .trigger.hidden {
+  display: none !important;
+}
+
 .source-dashboard-grid .feature-feed-widget .composer .trigger:hover {
   border-color: color-mix(in srgb, var(--accent), var(--board-border) 48%) !important;
   background: var(--board-card-hover) !important;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--board-border);
+  border-radius: 12px;
+  background: var(--board-card);
+  box-shadow: none;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form.hidden {
+  display: none !important;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-top > div:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-top strong {
+  color: var(--board-text);
+  font-size: 14px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-top span,
+.source-dashboard-grid .feature-feed-widget .dashboard-attachment-row span {
+  color: var(--board-muted);
+  font-size: 12px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form label,
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form fieldset {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  color: var(--board-muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form input,
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form select,
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--board-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--board-card), var(--surface-soft) 42%);
+  color: var(--board-text);
+  font: inherit;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-form textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-recipient-fieldset {
+  max-height: 154px;
+  overflow-y: auto;
+  padding: 9px;
+  border: 1px solid var(--board-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--board-card), var(--surface-soft) 30%);
+  scrollbar-width: thin;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-recipient-fieldset legend {
+  padding-inline: 6px;
+  color: var(--board-muted);
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-recipient-grid {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-recipient-grid label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+  margin: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--board-border);
+  border-radius: 9px;
+  background: var(--board-card);
+  color: var(--board-text);
+  font-size: 11.5px;
+  line-height: 1.15;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-recipient-grid label:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent), var(--board-border) 35%);
+  background: color-mix(in srgb, var(--accent), transparent 88%);
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-recipient-grid input {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-recipient-grid .avatar {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 7px;
+  font-size: 9.5px;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-attachment-row,
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-attachment-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-dashboard-grid .feature-feed-widget .dashboard-composer-actions {
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
 }
 
 .source-dashboard-grid .feature-feed-widget .composer .av {
@@ -14390,6 +14980,22 @@ table tbody tr:hover {
     padding: 12px !important;
   }
 
+  .source-dashboard-grid .feature-feed-widget .dashboard-composer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-dashboard-grid .feature-feed-widget .dashboard-attachment-row,
+  .source-dashboard-grid .feature-feed-widget .dashboard-composer-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-dashboard-grid .feature-feed-widget .dashboard-attachment-row > *,
+  .source-dashboard-grid .feature-feed-widget .dashboard-composer-actions > button {
+    width: 100%;
+    justify-content: center;
+  }
+
   .source-dashboard-grid .feature-feed-widget .feed-card {
     padding: 12px !important;
   }
@@ -14461,6 +15067,103 @@ table tbody tr:hover {
   margin-left: 0 !important;
 }
 
+.source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-comment-count.is-open {
+  border-color: color-mix(in srgb, var(--accent), var(--board-border) 24%) !important;
+  background: color-mix(in srgb, var(--accent), transparent 84%) !important;
+  color: var(--accent) !important;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0 39px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent), var(--board-border) 74%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface), var(--accent) 4%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  animation: feedCommentSlide 0.18s ease-out;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments-head h5 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments .comment-list {
+  display: grid;
+  gap: 8px;
+  max-height: 230px;
+  overflow: auto;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments .comment-card {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--board-border);
+  border-radius: 10px;
+  background: var(--board-chip);
+  box-shadow: none;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments .comment-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments .comment-card p,
+.source-dashboard-grid .feature-feed-widget .feed-inline-comments .muted {
+  margin: 0 !important;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comment-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin: 0;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comment-form input {
+  width: 100%;
+  min-height: 34px;
+  border-color: var(--board-border);
+  background: var(--board-chip);
+  color: var(--text);
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-inline-comment-form button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+}
+
+@keyframes feedCommentSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (max-width: 760px) {
   .source-dashboard-grid .feature-feed-widget .feed-card-actions {
     align-items: stretch !important;
@@ -14470,6 +15173,14 @@ table tbody tr:hover {
   .source-dashboard-grid .feature-feed-widget .feed-card-action-group {
     margin-left: 0 !important;
     justify-content: flex-start !important;
+  }
+
+  .source-dashboard-grid .feature-feed-widget .feed-inline-comments {
+    margin-left: 0;
+  }
+
+  .source-dashboard-grid .feature-feed-widget .feed-inline-comment-form {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -18394,52 +19105,306 @@ table tbody tr:hover {
   line-height: 1;
 }
 
-#time .saturday-wage-section {
-  margin: 0 16px 14px;
-  border: 1px solid color-mix(in srgb, var(--warn), var(--border) 68%);
-  border-radius: 13px;
-  background: color-mix(in srgb, var(--warn-soft), var(--surface) 62%);
-  padding: 13px;
+#time .saturday-wage-card {
+  overflow: hidden;
 }
 
-[data-theme="dark"] #time .saturday-wage-section {
-  background: color-mix(in srgb, var(--warn), var(--surface) 88%);
-}
-
-#time .saturday-wage-head {
-  display: flex;
+#time .saturday-wage-card .panel-header {
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 11px;
 }
 
-#time .saturday-wage-head strong,
-#time .saturday-wage-head span {
-  display: block;
-}
-
-#time .saturday-wage-head strong {
-  color: var(--text);
-  font-size: 13.5px;
-  font-weight: 820;
-}
-
-#time .saturday-wage-head div > span {
-  margin-top: 2px;
+#time .saturday-wage-card .panel-header p {
+  margin: 3px 0 0;
   color: var(--muted);
   font-size: 11.5px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 #time .saturday-wage-form {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin: 0;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
 }
 
-#time .saturday-wage-form input {
+#time .saturday-wage-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  font-weight: 720;
+}
+
+#time .saturday-wage-form input,
+#time .saturday-wage-form select {
   min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+#time .saturday-wage-form input:focus,
+#time .saturday-wage-form select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+  outline: none;
+}
+
+#time .saturday-note-field,
+#time .saturday-wage-form .primary-button {
+  grid-column: 1 / -1;
+}
+
+#time .saturday-wage-form .primary-button {
+  min-height: 38px;
+  border-radius: 9px;
+}
+
+#time .saturday-wage-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+#time .saturday-wage-summary div {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--warn), var(--border) 72%);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--warn-soft), var(--surface) 62%);
+  padding: 9px 10px;
+}
+
+[data-theme="dark"] #time .saturday-wage-summary div {
+  background: color-mix(in srgb, var(--warn), var(--surface) 88%);
+}
+
+#time .saturday-wage-summary span,
+#time .saturday-wage-summary strong {
+  display: block;
+}
+
+#time .saturday-wage-summary span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+}
+
+#time .saturday-wage-summary strong {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 840;
+  white-space: nowrap;
+}
+
+#time .saturday-wage-list {
+  display: grid;
+  max-height: 280px;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+#time .saturday-wage-entry {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 32px;
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 9px;
+}
+
+#time .saturday-wage-entry time {
+  display: grid;
+  min-height: 40px;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warn-soft), var(--surface) 32%);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 840;
+  text-align: center;
+  text-transform: lowercase;
+}
+
+#time .saturday-wage-entry div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#time .saturday-wage-entry strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 820;
+}
+
+#time .saturday-wage-entry span,
+#time .saturday-wage-entry small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#time .saturday-wage-entry .icon-button {
+  display: grid;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+#time .saturday-wage-empty {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+  padding: 14px;
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: center;
+}
+
+#correctionForm {
+  width: min(680px, calc(100vw - 32px));
+}
+
+#correctionForm .correction-form-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+#correctionForm .correction-reason-field {
+  grid-column: 1 / -1;
+}
+
+#correctionForm textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+#correctionForm .correction-form-note {
+  margin: 0 0 12px;
+}
+
+#adminTimeEditForm {
+  width: min(760px, calc(100vw - 32px));
+}
+
+#adminTimeEditForm .admin-time-edit-grid {
+  grid-template-columns: 1.25fr repeat(4, minmax(0, 1fr));
+}
+
+#adminTimeEditForm .admin-time-edit-note {
+  margin: 0 0 12px;
+}
+
+#time .admin-time-control-panel {
+  display: grid;
+  gap: 12px;
+}
+
+#time .admin-time-entry-list {
+  display: grid;
+  gap: 8px;
+}
+
+#time .admin-time-entry-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+#time .admin-time-entry-card > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#time .admin-time-entry-card strong,
+#time .admin-time-entry-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#time .admin-time-entry-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#time .correction-request-card {
+  display: grid;
+  gap: 10px;
+}
+
+#time .correction-request-card.resolved {
+  opacity: 0.78;
+}
+
+#time .correction-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+#time .correction-summary div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  padding: 8px 9px;
+}
+
+#time .correction-summary span,
+#time .correction-summary strong {
+  display: block;
+}
+
+#time .correction-summary span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 760;
+}
+
+#time .correction-summary strong {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#time .correction-reason {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 #time .wage-summary {
@@ -18448,9 +19413,184 @@ table tbody tr:hover {
 
 @media (max-width: 760px) {
   #knowledgeFormDialog .task-form-grid,
+  #adminTimeEditForm .admin-time-edit-grid,
+  #correctionForm .correction-form-grid,
+  #time .correction-summary,
   #time .saturday-wage-form,
+  #time .saturday-wage-summary,
   #time .wage-summary {
     grid-template-columns: 1fr;
+  }
+
+  #time .saturday-wage-entry {
+    grid-template-columns: 66px minmax(0, 1fr) 32px;
+  }
+
+  #time .admin-time-entry-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  #time .admin-time-entry-card .pill,
+  #time .admin-time-entry-card .secondary-button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+#time .source-time-layout {
+  grid-template-columns: repeat(12, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  align-items: start !important;
+}
+
+#time .source-time-kpis {
+  grid-column: 1 / -1 !important;
+  grid-template-columns: repeat(4, minmax(158px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+#time .time-kpi-card {
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 82px !important;
+  padding: 13px 14px !important;
+}
+
+#time .time-kpi-card .ic {
+  grid-row: 1 / 3;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+}
+
+#time .time-kpi-card .lbl {
+  align-self: end;
+  margin-top: 0;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+#time .time-kpi-card .val {
+  align-self: start;
+  margin-top: 1px;
+  overflow: hidden;
+  font-size: clamp(20px, 2vw, 24px);
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#time .time-week-chart-panel,
+#time .time-day-log-panel,
+#time .time-clock-panel,
+#time .time-pulse-panel,
+#time .admin-time-control-panel {
+  grid-column: span 6 !important;
+}
+
+#time .wide-panel,
+#time .source-time-layout > .panel:last-child {
+  grid-column: 1 / -1 !important;
+}
+
+#time .wage-panel {
+  grid-column: span 5 !important;
+}
+
+#time .saturday-wage-card {
+  grid-column: span 7 !important;
+}
+
+#time .time-clock-panel .stats-row,
+#time .time-pulse-panel .team-pulse,
+#time .wage-panel .wage-summary {
+  gap: 9px !important;
+  margin: 0 !important;
+  padding: 0 14px 14px !important;
+}
+
+#time .wage-panel .wage-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+#time .time-clock-panel .stats-row div,
+#time .time-pulse-panel .team-pulse div,
+#time .wage-panel .wage-summary div,
+#time .saturday-wage-summary div {
+  display: grid;
+  min-height: 62px;
+  align-content: center;
+  gap: 3px;
+  padding: 10px 11px;
+}
+
+#time .wage-panel .wage-form {
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 0 !important;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+#time .saturday-wage-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#time .saturday-note-field {
+  grid-column: 1 / span 2;
+}
+
+#time .saturday-wage-form .primary-button {
+  grid-column: 3;
+  align-self: end;
+}
+
+@media (max-width: 1120px) {
+  #time .source-time-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  #time .wage-panel,
+  #time .saturday-wage-card {
+    grid-column: 1 / -1 !important;
+  }
+
+  #time .saturday-wage-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #time .saturday-note-field,
+  #time .saturday-wage-form .primary-button {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 820px) {
+  #time .source-time-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  #time .source-time-kpis,
+  #time .time-week-chart-panel,
+  #time .time-day-log-panel,
+  #time .time-clock-panel,
+  #time .time-pulse-panel,
+  #time .admin-time-control-panel,
+  #time .wide-panel,
+  #time .wage-panel,
+  #time .saturday-wage-card,
+  #time .source-time-layout > .panel:last-child {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 560px) {
+  #time .source-time-kpis {
+    grid-template-columns: 1fr !important;
   }
 }
 
