@@ -10,9 +10,9 @@ let myDayItems = [];
 let posts = [];
 
 const postReactionTypes = [
-  { id: "like", icon: "👍", label: "Dzięki" },
-  { id: "done", icon: "✅", label: "Przyjęte" },
-  { id: "question", icon: "❓", label: "Pytanie" },
+  { id: "like", icon: "👍", label: "Kciuk w górę" },
+  { id: "question", icon: "❤️", label: "Serce" },
+  { id: "done", icon: "✅", label: "Checkbox" },
 ];
 
 let tasks = {
@@ -248,11 +248,9 @@ const notificationSourceOptions = [
 ];
 
 const feedTypeFilters = [
-  { id: "all", label: "Wszystkie typy" },
-  { id: "announcements", label: "Ogłoszenia" },
-  { id: "reports", label: "Zgłoszenia" },
-  { id: "tasks", label: "Zadania" },
-  { id: "calendar", label: "Kalendarz" },
+  { id: "announcements", label: "Ogłoszenia", icon: "📣" },
+  { id: "tasks", label: "Zadania", icon: "✅" },
+  { id: "reports", label: "Zgłoszenia", icon: "🛡️" },
 ];
 
 const calendarSources = [
@@ -4683,27 +4681,20 @@ function feedTypeLabel(typeId) {
 
 function renderFeedTypeFilterOptions(items) {
   const container = $("#feedTypeFilter");
-  if (!container) return;
-  const counts = new Map();
-  items.forEach((item) => {
-    counts.set(item.category, (counts.get(item.category) || 0) + 1);
+  if (container) container.innerHTML = "";
+  if (currentFeedTypeFilter !== "all" && !feedTypeFilters.some((filter) => filter.id === currentFeedTypeFilter)) {
+    currentFeedTypeFilter = "all";
+  }
+  $$("#annFilter [data-feed-filter], #annFilter [data-feed-type-filter]").forEach((button) => {
+    const typeFilter = button.dataset.feedTypeFilter;
+    const modeFilter = button.dataset.feedFilter;
+    const active = typeFilter
+      ? currentFeedFilter === "all" && currentFeedTypeFilter === typeFilter
+      : currentFeedTypeFilter === "all" && modeFilter === currentFeedFilter;
+    button.classList.toggle("active", active);
+    button.classList.toggle("on", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
   });
-  if (!feedTypeFilters.some((filter) => filter.id === currentFeedTypeFilter)) currentFeedTypeFilter = "all";
-  container.innerHTML = feedTypeFilters
-    .map((filter) => {
-      const count = filter.id === "all" ? items.length : counts.get(filter.id) || 0;
-      const active = filter.id === currentFeedTypeFilter;
-      const disabled = filter.id !== "all" && count === 0;
-      return `
-        <button class="chip feed-type-chip ${active ? "active on" : ""}" data-feed-type-filter="${escapeHtml(
-          filter.id,
-        )}" type="button" aria-pressed="${active ? "true" : "false"}" ${disabled ? "disabled" : ""}>
-          <span>${escapeHtml(filter.label)}</span>
-          <small>${count}</small>
-        </button>
-      `;
-    })
-    .join("");
 }
 
 function decorateFeedItems(items) {
@@ -4955,7 +4946,7 @@ function feedStatusTagClass(item) {
 function renderActivityFeedItemLegacy(item) {
   const authorName = item.actorLogin ? getDisplayNameByLogin(item.actorLogin) : item.type || "PRO-KOM";
   const initials = getInitialsByLogin(item.actorLogin, authorName || item.type || "PK");
-  const statusLabel = item.pill || (item.unread ? "Do odczytu" : "Aktualne");
+  const statusLabel = item.pill || "Aktualne";
   const statusClass = feedStatusTagClass(item);
   const tagClass =
     item.category === "announcements"
@@ -4981,7 +4972,7 @@ function renderActivityFeedItemLegacy(item) {
         <span class="tag source-status-tag ${statusClass}">${escapeHtml(statusLabel)}</span>
         ${item.fresh ? `<span class="feed-new-indicator" title="Nowy wpis od ostatniej wizyty" aria-label="Nowy wpis"></span>` : ""}
         ${item.pinned ? `<span class="state s-todo">Przypięte</span>` : ""}
-        <span class="source-card-menu">...</span>
+        ${renderFeedPinButton(item)}
       </div>
       <h4>${escapeHtml(item.title)}</h4>
       <p>${escapeHtml(item.body)}</p>
@@ -4989,9 +4980,8 @@ function renderActivityFeedItemLegacy(item) {
       <div class="feed-meta sub">${escapeHtml(item.meta)}</div>
       ${item.extraHtml || ""}
       <div class="item-actions feed-card-actions">
-        <button class="rbtn" data-feed-pin="${escapeHtml(item.id)}" type="button" title="${item.pinned ? "Odepnij" : "Przypnij"}">${item.pinned ? "📌" : "📍"}</button>
         <button class="rbtn" data-feed-detail="${escapeHtml(item.id)}" type="button">💬 0</button>
-        <span class="rbtn ${item.unread ? "" : "on"}">${item.unread ? "Do odczytu" : "✓ Odczytane"}</span>
+        ${renderActivityFeedReadAction(item)}
         <button class="mini" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
         <button class="mini" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
       </div>
@@ -5084,7 +5074,7 @@ function renderFeedInlineComments(item) {
   return `
     <section class="feed-inline-comments is-open" data-feed-inline-comments="${escapeHtml(item.id)}">
       <div class="feed-inline-comments-head">
-        <h5>Komentarze</h5>
+        <h5 aria-label="Komentarze"><span aria-hidden="true">&#128172;</span></h5>
         <span class="pill">${context.comments.length}</span>
       </div>
       <div class="comment-list">
@@ -5143,37 +5133,76 @@ async function submitFeedInlineComment(event) {
   }, 40);
 }
 
+function renderFeedPinButton(item) {
+  const label = item.pinned ? "Odepnij" : "Przypnij";
+  return `
+    <button class="source-feed-pin-button ${item.pinned ? "is-pinned" : ""}" data-feed-pin="${escapeHtml(
+      item.id,
+    )}" type="button" aria-label="${label}" title="${label}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <path d="M14.5 4.5 19.5 9.5" />
+        <path d="m9.5 14.5-5 5" />
+        <path d="M15.5 3.5 20.5 8.5 16.5 10 12.5 16 8 11.5 14 7.5 15.5 3.5Z" />
+      </svg>
+    </button>
+  `;
+}
+
 function renderActivityFeedReactions(item) {
-  const pinButton = `<button class="rbtn feed-pin-button" data-feed-pin="${escapeHtml(item.id)}" type="button" aria-label="${
-    item.pinned ? "Odepnij wpis" : "Przypnij wpis"
-  }" title="${item.pinned ? "Odepnij" : "Przypnij"}">${item.pinned ? "&#128204;" : "&#128205;"}</button>`;
   const post = getFeedAnnouncementPost(item);
   if (!post) {
     const task = item.category === "tasks" ? getTaskRef(item.target?.taskId)?.task : null;
     const report = item.category === "reports" ? getReportById(item.target?.reportId) : null;
     if (task) {
       const commentsCount = normalizeEntityComments(task.comments).length;
-      return `${pinButton}${renderEntityReactionButtons(
-        task.reactions,
-        "task",
-        task.id,
-        "rbtn feed-reaction-button",
-      )}<button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
-        item.id,
-      )}" type="button" aria-expanded="${isFeedCommentsOpen(item.id) ? "true" : "false"}" aria-label="Rozwin komentarze zadania">&#128172; ${commentsCount}</button>`;
+      const subtaskCount = Array.isArray(task.subtasks) ? task.subtasks.length : 0;
+      const doneSubtasks = Array.isArray(task.subtasks) ? task.subtasks.filter((subtask) => subtask.done).length : 0;
+      return `
+        <button class="rbtn feed-primary-action" data-task-detail="${escapeHtml(task.id)}" type="button">
+          Zmień status
+        </button>
+        <button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
+          item.id,
+        )}" type="button" aria-expanded="${isFeedCommentsOpen(item.id) ? "true" : "false"}" aria-label="Rozwiń komentarze zadania">
+          <span aria-hidden="true">&#128172;</span>
+          <span>${commentsCount}</span>
+        </button>
+        ${
+          subtaskCount
+            ? `<span class="rbtn feed-static-pill">${doneSubtasks}/${subtaskCount} podzadań</span>`
+            : ""
+        }
+      `;
     }
     if (report) {
       const commentsCount = normalizeEntityComments(report.comments).length;
-      return `${pinButton}${renderEntityReactionButtons(
-        report.reactions,
-        "report",
-        report.id,
-        "rbtn feed-reaction-button",
-      )}<button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
-        item.id,
-      )}" type="button" aria-label="Dodaj komentarz do zgłoszenia">&#128172; ${commentsCount}</button>`;
+      const isAccepted = reportIsAccepted(report);
+      const isClosed = reportIsClosed(report);
+      return `
+        ${
+          isClosed
+            ? `<span class="rbtn feed-static-pill is-done">Załatwione</span>`
+            : `
+              <button class="rbtn feed-primary-action" data-report-accept="${escapeHtml(report.id)}" type="button" ${
+                isAccepted ? "disabled" : ""
+              }>${isAccepted ? "Przyjęte" : "Przyjmij"}</button>
+              <button class="rbtn feed-primary-action" data-report-task="${escapeHtml(report.id)}" type="button">
+                Utwórz zadanie
+              </button>
+              <button class="rbtn feed-primary-action" data-report-close="${escapeHtml(report.id)}" type="button">
+                Załatw
+              </button>
+            `
+        }
+        <button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
+          item.id,
+        )}" type="button" aria-expanded="${isFeedCommentsOpen(item.id) ? "true" : "false"}" aria-label="Rozwiń komentarze zgłoszenia">
+          <span aria-hidden="true">&#128172;</span>
+          <span>${commentsCount}</span>
+        </button>
+      `;
     }
-    return `${pinButton}<button class="rbtn feed-comment-count" data-feed-detail="${escapeHtml(
+    return `<button class="rbtn feed-comment-count" data-feed-detail="${escapeHtml(
       item.id,
     )}" type="button" aria-label="Komentarze">&#128172; 0</button>`;
   }
@@ -5194,7 +5223,7 @@ function renderActivityFeedReactions(item) {
     })
     .join("");
   const commentsCount = post.comments?.length || 0;
-  return `${pinButton}${reactionButtons}<button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
+  return `${reactionButtons}<button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
     item.id,
   )}" type="button" aria-label="Dodaj komentarz">&#128172; ${commentsCount}</button>`;
 }
@@ -5202,16 +5231,15 @@ function renderActivityFeedReactions(item) {
 function renderActivityFeedReadAction(item) {
   const post = getFeedAnnouncementPost(item);
   if (!post) {
-    return `<span class="rbtn readr ${item.unread ? "" : "on"}">${item.unread ? "Do odczytu" : "✓ Odczytane"}</span>`;
+    return "";
   }
   const isRead = !post.unread;
   if (isRead) {
-    return `<span class="rbtn readr on">✓ Odczytane</span>`;
+    return `<span class="rbtn readr on feed-read-state">Odczytane</span>`;
   }
   return `
-    <span class="rbtn readr">Do odczytu</span>
-    <button class="mini feed-read-button" data-feed-read="${escapeHtml(post.id)}" type="button">
-      Potwierdź odczyt
+    <button class="rbtn readr feed-read-button" data-feed-read="${escapeHtml(post.id)}" type="button">
+      Zaznacz jako odczytane
     </button>
   `;
 }
@@ -5219,7 +5247,7 @@ function renderActivityFeedReadAction(item) {
 function renderActivityFeedItem(item) {
   const authorName = item.actorLogin ? getDisplayNameByLogin(item.actorLogin) : item.type || "PRO-KOM";
   const initials = getInitialsByLogin(item.actorLogin, authorName || item.type || "PK");
-  const statusLabel = item.pill || (item.unread ? "Do odczytu" : "Aktualne");
+  const statusLabel = item.pill || "Aktualne";
   const statusClass = feedStatusTagClass(item);
   const tagClass =
     item.category === "announcements"
@@ -5245,7 +5273,7 @@ function renderActivityFeedItem(item) {
         <span class="tag source-status-tag ${statusClass}">${escapeHtml(statusLabel)}</span>
         ${item.fresh ? `<span class="feed-new-indicator" title="Nowy wpis od ostatniej wizyty" aria-label="Nowy wpis"></span>` : ""}
         ${item.pinned ? `<span class="state s-todo">Przypięte</span>` : ""}
-        <span class="source-card-menu">...</span>
+        ${renderFeedPinButton(item)}
       </div>
       <h4>${escapeHtml(item.title)}</h4>
       <p>${escapeHtml(item.body)}</p>
@@ -5258,8 +5286,8 @@ function renderActivityFeedItem(item) {
         </div>
         <div class="feed-card-action-group">
           ${renderActivityFeedReadAction(item)}
-          <button class="mini" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
-          <button class="mini" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
+          <button class="mini feed-source-action" data-feed-source="${escapeHtml(item.id)}" type="button">Przejdź do źródła</button>
+          <button class="mini feed-detail-action" data-feed-detail="${escapeHtml(item.id)}" type="button">Otwórz szczegóły</button>
         </div>
       </div>
       ${renderFeedInlineComments(item)}
@@ -5389,8 +5417,8 @@ function renderPosts(filter = "all") {
     const authorName = post.author || getDisplayNameByLogin(post.authorLogin);
     const timeLabel = activityTimeLabel(post.createdAt, post.unread ? "nieodczytane" : "ogłoszenie");
     const likeCount = post.reactions.like?.length || 0;
-    const doneCount = post.reactions.done?.length || 0;
-    const questionCount = post.reactions.question?.length || 0;
+    const heartCount = post.reactions.question?.length || 0;
+    const checkboxCount = post.reactions.done?.length || 0;
     const commentsCount = post.comments.length;
     const readActionLabel = post.unread ? "Potwierdź odczyt" : "Odczytane";
     const discussionLabel = post.unread || commentsCount ? "Odczyty i komentarze" : "Komentarze";
@@ -5408,8 +5436,8 @@ function renderPosts(filter = "all") {
           <span>${escapeHtml(authorName)}</span>
           <span>odczytali ${post.read}/${post.total}</span>
           <span>👍 ${likeCount}</span>
-          <span>✅ ${doneCount} potwierdzenia</span>
-          <span>❔ ${questionCount}</span>
+          <span>❤️ ${heartCount}</span>
+          <span>✅ ${checkboxCount}</span>
           <span>💬 ${commentsCount}</span>
         </div>
         ${attachmentHtml}
@@ -5417,7 +5445,9 @@ function renderPosts(filter = "all") {
           <button class="announcement-read-chip ${post.unread ? "" : "is-read"}" data-open-post="${post.id}" type="button">${escapeHtml(
             readActionLabel,
           )}</button>
-          <button class="announcement-read-chip" data-open-post="${post.id}" type="button">${escapeHtml(discussionLabel)}</button>
+          <button class="announcement-read-chip" data-open-post="${post.id}" type="button" aria-label="${escapeHtml(
+            discussionLabel,
+          )}"><span aria-hidden="true">&#128172;</span> ${commentsCount}</button>
         </div>
       </article>
     `;
@@ -7117,7 +7147,7 @@ function renderReports() {
           </div>
           <section class="comment-section report-comment-section ${commentsOpen ? "is-open" : ""}">
             <div class="comment-section-header">
-              <h4>Komentarze</h4>
+              <h4 aria-label="Komentarze"><span aria-hidden="true">&#128172;</span></h4>
               <span class="pill">${commentsCount}</span>
             </div>
             <div class="comment-list">${renderEntityComments(reportComments, "Brak komentarzy do zgłoszenia.")}</div>
@@ -10566,7 +10596,7 @@ async function boot() {
     const feedReadButton = event.target.closest("[data-feed-read]");
     if (feedReadButton) {
       const post = await markPostRead(feedReadButton.dataset.feedRead);
-      if (post) showToast("Odczyt potwierdzony", post.title);
+      if (post && !post.unread) showToast("Odczyt potwierdzony", post.title);
       return;
     }
 
@@ -11030,12 +11060,19 @@ async function boot() {
   });
 
   $("[data-feed-filter='all']").parentElement.addEventListener("click", (event) => {
-    if (!event.target.matches("button")) return;
-    $$("[data-feed-filter]").forEach((button) => button.classList.toggle("active", button === event.target));
-    renderPosts(event.target.dataset.feedFilter);
+    const button = event.target.closest("button");
+    if (!button || !event.currentTarget.contains(button)) return;
+    if (button.dataset.feedTypeFilter) {
+      currentFeedTypeFilter = button.dataset.feedTypeFilter || "all";
+      renderPosts("all");
+      return;
+    }
+    if (!button.dataset.feedFilter) return;
+    currentFeedTypeFilter = "all";
+    renderPosts(button.dataset.feedFilter);
   });
 
-  $("#feedTypeFilter").addEventListener("click", (event) => {
+  $("#feedTypeFilter")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-feed-type-filter]");
     if (!button || button.disabled) return;
     currentFeedTypeFilter = button.dataset.feedTypeFilter || "all";

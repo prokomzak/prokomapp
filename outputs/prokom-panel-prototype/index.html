@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#4f46e5" />
     <title>Panel Firmowy PRO-KOM</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=158" />
+    <link rel="stylesheet" href="styles.css?v=166" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -205,16 +205,26 @@
             <article class="card feature-feed-widget" draggable="true">
               <div class="card-h">
                 <h3>📌 Tablica ogłoszeń</h3>
-                <div class="chips" id="annFilter">
-                  <button class="chip on active" data-feed-filter="all" type="button">Wszystkie</button>
-                  <button class="chip" data-feed-filter="urgent" type="button">Pilne</button>
-                  <button class="chip" data-feed-filter="important" type="button">Ważne</button>
-                  <button class="chip" data-feed-filter="mine" type="button">Moje</button>
-                  <button class="chip" data-feed-filter="unread" type="button">Nieprzeczytane</button>
+                <div class="chips feed-main-filters" id="annFilter">
+                  <button class="chip on active" data-feed-filter="all" type="button" aria-pressed="true">Wszystko</button>
+                  <button class="chip feed-type-chip" data-feed-type-filter="announcements" type="button" aria-pressed="false">
+                    <span class="feed-type-icon" aria-hidden="true">📣</span>
+                    <span>Ogłoszenia</span>
+                  </button>
+                  <button class="chip feed-type-chip" data-feed-type-filter="tasks" type="button" aria-pressed="false">
+                    <span class="feed-type-icon" aria-hidden="true">✅</span>
+                    <span>Zadania</span>
+                  </button>
+                  <button class="chip feed-type-chip" data-feed-type-filter="reports" type="button" aria-pressed="false">
+                    <span class="feed-type-icon" aria-hidden="true">🛡️</span>
+                    <span>Zgłoszenia</span>
+                  </button>
+                  <button class="chip" data-feed-filter="mine" type="button" aria-pressed="false">Moje</button>
+                  <button class="chip" data-feed-filter="unread" type="button" aria-pressed="false">Nieprzeczytane</button>
                 </div>
               </div>
               <div class="card-b">
-                <div class="feed-type-filter-row" id="feedTypeFilter" role="group" aria-label="Filtr typu wpisów na tablicy"></div>
+                <div class="feed-type-filter-row" id="feedTypeFilter" role="group" aria-label="Filtr typu wpisów na tablicy" hidden></div>
                 <div class="composer" id="dashboardComposer">
                   <button class="trigger" id="dashboardComposerTrigger" data-dashboard-composer-toggle type="button">
                     <div class="av source-composer-avatar" data-announcement-composer-avatar aria-label="Autor ogłoszenia">TA</div>
@@ -1380,7 +1390,7 @@
             <div class="reaction-bar" id="postReactionBar"></div>
           </div>
           <div>
-            <h3>Komentarze</h3>
+            <h3 aria-label="Komentarze"><span aria-hidden="true">&#128172;</span></h3>
             <div class="comment-list" id="postComments"></div>
             <form class="comment-form" id="postCommentForm">
               <input id="postCommentInput" type="text" placeholder="Dodaj komentarz do ogłoszenia" required />
@@ -1633,7 +1643,7 @@
         <div class="reaction-bar entity-dialog-reactions" id="taskReactionBar"></div>
         <section class="comment-section task-comment-section">
           <div class="comment-section-header">
-            <h3>Komentarze</h3>
+            <h3 aria-label="Komentarze"><span aria-hidden="true">&#128172;</span></h3>
             <span class="pill" id="taskCommentCount">0</span>
           </div>
           <div class="comment-list" id="taskComments"></div>
@@ -1898,6 +1908,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <script src="data.js?v=78"></script>
-    <script src="app.js?v=157"></script>
+    <script src="app.js?v=166"></script>
   </body>
 </html>
