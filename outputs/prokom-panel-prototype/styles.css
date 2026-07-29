@@ -15136,10 +15136,115 @@ table tbody tr:hover {
   font-weight: 820 !important;
 }
 
+.source-dashboard-grid .feature-feed-widget .feed-task-status-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-task-status-button {
+  border-color: color-mix(in srgb, var(--accent), var(--board-border) 16%) !important;
+  background: var(--accent) !important;
+  color: #fff !important;
+  font-weight: 720 !important;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent), transparent 76%) !important;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-report-status-action {
+  border-color: color-mix(in srgb, var(--accent), var(--board-border) 16%) !important;
+  background: var(--accent) !important;
+  color: #fff !important;
+  font-weight: 720 !important;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent), transparent 78%) !important;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-task-status-menu {
+  position: absolute;
+  z-index: 45;
+  left: 0;
+  top: calc(100% + 7px);
+  display: grid;
+  min-width: 178px;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--board-border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 18px 38px color-mix(in srgb, #000, transparent 78%);
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-task-status-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 31px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-soft);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 760;
+  text-align: left;
+  box-shadow: none;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-task-status-menu button:hover,
+.source-dashboard-grid .feature-feed-widget .feed-task-status-menu button:focus-visible {
+  background: color-mix(in srgb, var(--accent), transparent 88%);
+  color: var(--accent);
+  outline: none;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-task-status-menu button.is-current {
+  background: var(--board-chip);
+  color: var(--text);
+  cursor: default;
+  opacity: 0.78;
+}
+
+.source-dashboard-grid .feature-feed-widget .task-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.source-dashboard-grid .feature-feed-widget .task-status-dot.status-todo {
+  background: #f59e0b;
+}
+
+.source-dashboard-grid .feature-feed-widget .task-status-dot.status-doing {
+  background: #4f7df3;
+}
+
+.source-dashboard-grid .feature-feed-widget .task-status-dot.status-review {
+  background: #6366f1;
+}
+
+.source-dashboard-grid .feature-feed-widget .task-status-dot.status-done {
+  background: #10b981;
+}
+
 .source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-primary-action:hover,
 .source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-primary-action:focus-visible {
   background: color-mix(in srgb, var(--accent), transparent 82%) !important;
   outline: none !important;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-task-status-button:hover,
+.source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-task-status-button:focus-visible,
+.source-dashboard-grid .feature-feed-widget .feed-task-status-wrap.is-open .feed-task-status-button {
+  background: color-mix(in srgb, var(--accent), #fff 10%) !important;
+  color: #fff !important;
+}
+
+.source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-report-status-action:hover,
+.source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-report-status-action:focus-visible {
+  background: color-mix(in srgb, var(--accent), #fff 10%) !important;
+  color: #fff !important;
 }
 
 .source-dashboard-grid .feature-feed-widget .feed-card-actions .feed-primary-action:disabled {
@@ -15304,6 +15409,11 @@ table tbody tr:hover {
   .source-dashboard-grid .feature-feed-widget .feed-card-action-group {
     margin-left: 0 !important;
     justify-content: flex-start !important;
+  }
+
+  .source-dashboard-grid .feature-feed-widget .feed-task-status-menu {
+    left: 0;
+    right: auto;
   }
 
   .source-dashboard-grid .feature-feed-widget .feed-inline-comments {

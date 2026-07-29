@@ -121,6 +121,7 @@ const pinnedFeedItemIds = new Set();
 const seenFeedItemIds = new Set();
 const freshFeedItemIds = new Set();
 const expandedFeedCommentIds = new Set();
+let activeFeedTaskStatusMenuId = null;
 let taskPollTimer = null;
 let taskPollInFlight = false;
 const taskPollIntervalMs = 5000;
@@ -5148,19 +5149,52 @@ function renderFeedPinButton(item) {
   `;
 }
 
+function renderFeedTaskStatusMenu(taskId, currentColumn) {
+  const open = String(activeFeedTaskStatusMenuId) === String(taskId);
+  return `
+    <div class="feed-task-status-wrap ${open ? "is-open" : ""}">
+      <button class="rbtn feed-primary-action feed-task-status-button" data-feed-task-status-toggle="${escapeHtml(
+        taskId,
+      )}" type="button" aria-haspopup="menu" aria-expanded="${open ? "true" : "false"}">
+        Zmień status
+      </button>
+      ${
+        open
+          ? `<div class="feed-task-status-menu" role="menu" aria-label="Wybierz status zadania">
+              ${Object.entries(columnLabels)
+                .map(([column, label]) => {
+                  const active = column === currentColumn;
+                  return `
+                    <button class="${active ? "is-current" : ""}" data-feed-task-status="${escapeHtml(
+                      column,
+                    )}" data-feed-task-id="${escapeHtml(taskId)}" role="menuitem" type="button" ${
+                      active ? "disabled" : ""
+                    }>
+                      <span class="task-status-dot status-${escapeHtml(column)}" aria-hidden="true"></span>
+                      <span>${escapeHtml(label)}</span>
+                    </button>
+                  `;
+                })
+                .join("")}
+            </div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
 function renderActivityFeedReactions(item) {
   const post = getFeedAnnouncementPost(item);
   if (!post) {
-    const task = item.category === "tasks" ? getTaskRef(item.target?.taskId)?.task : null;
+    const taskRef = item.category === "tasks" ? getTaskRef(item.target?.taskId) : null;
+    const task = taskRef?.task || null;
     const report = item.category === "reports" ? getReportById(item.target?.reportId) : null;
     if (task) {
       const commentsCount = normalizeEntityComments(task.comments).length;
       const subtaskCount = Array.isArray(task.subtasks) ? task.subtasks.length : 0;
       const doneSubtasks = Array.isArray(task.subtasks) ? task.subtasks.filter((subtask) => subtask.done).length : 0;
       return `
-        <button class="rbtn feed-primary-action" data-task-detail="${escapeHtml(task.id)}" type="button">
-          Zmień status
-        </button>
+        ${renderFeedTaskStatusMenu(task.id, taskRef?.column || task.column || "todo")}
         <button class="rbtn feed-comment-count ${isFeedCommentsOpen(item.id) ? "is-open" : ""}" data-feed-comment-toggle="${escapeHtml(
           item.id,
         )}" type="button" aria-expanded="${isFeedCommentsOpen(item.id) ? "true" : "false"}" aria-label="Rozwiń komentarze zadania">
@@ -5183,13 +5217,13 @@ function renderActivityFeedReactions(item) {
           isClosed
             ? `<span class="rbtn feed-static-pill is-done">Załatwione</span>`
             : `
-              <button class="rbtn feed-primary-action" data-report-accept="${escapeHtml(report.id)}" type="button" ${
+              <button class="rbtn feed-primary-action feed-report-status-action" data-report-accept="${escapeHtml(report.id)}" type="button" ${
                 isAccepted ? "disabled" : ""
               }>${isAccepted ? "Przyjęte" : "Przyjmij"}</button>
-              <button class="rbtn feed-primary-action" data-report-task="${escapeHtml(report.id)}" type="button">
+              <button class="rbtn feed-primary-action feed-report-status-action" data-report-task="${escapeHtml(report.id)}" type="button">
                 Utwórz zadanie
               </button>
-              <button class="rbtn feed-primary-action" data-report-close="${escapeHtml(report.id)}" type="button">
+              <button class="rbtn feed-primary-action feed-report-status-action" data-report-close="${escapeHtml(report.id)}" type="button">
                 Załatw
               </button>
             `
@@ -5899,7 +5933,7 @@ async function moveTask(taskId, nextColumn) {
   const [moved] = tasks[ref.column].splice(ref.index, 1);
   tasks[nextColumn].push(moved);
   saveTaskState();
-  renderKanban();
+  renderTaskState();
   showToast("Zadanie przeniesione", `${moved.title}: ${columnLabels[nextColumn]}.`);
 }
 
@@ -10585,6 +10619,29 @@ async function boot() {
     if (calendarDayButton) {
       openCalendarDayDetails(calendarDayButton.dataset.calendarDay);
       return;
+    }
+
+    const feedTaskStatusToggle = event.target.closest("[data-feed-task-status-toggle]");
+    if (feedTaskStatusToggle) {
+      const taskId = feedTaskStatusToggle.dataset.feedTaskStatusToggle;
+      activeFeedTaskStatusMenuId = String(activeFeedTaskStatusMenuId) === String(taskId) ? null : taskId;
+      renderPosts(currentFeedFilter);
+      return;
+    }
+
+    const feedTaskStatusButton = event.target.closest("[data-feed-task-status]");
+    if (feedTaskStatusButton) {
+      const taskId = feedTaskStatusButton.dataset.feedTaskId;
+      const nextColumn = feedTaskStatusButton.dataset.feedTaskStatus;
+      activeFeedTaskStatusMenuId = null;
+      await moveTask(taskId, nextColumn);
+      renderPosts(currentFeedFilter);
+      return;
+    }
+
+    if (activeFeedTaskStatusMenuId && !event.target.closest(".feed-task-status-wrap")) {
+      activeFeedTaskStatusMenuId = null;
+      renderPosts(currentFeedFilter);
     }
 
     const feedReactionButton = event.target.closest("[data-feed-reaction]");
